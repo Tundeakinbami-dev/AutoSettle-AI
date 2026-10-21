@@ -3,39 +3,49 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("🌱 Seeding AutoSettle AI dispute database...");
+  console.log("🌱 Seeding AutoSettle AI enterprise dispute database with all 11 models...");
 
-  // Clear existing
-  await prisma.submissionAuditLog.deleteMany();
-  await prisma.disputeAnalysis.deleteMany();
+  // 1. Clean existing records in correct foreign key order
+  await prisma.auditLogEntry.deleteMany();
+  await prisma.webhookEvent.deleteMany();
+  await prisma.submissionAttempt.deleteMany();
+  await prisma.draftResponse.deleteMany();
+  await prisma.aiAnalysis.deleteMany();
   await prisma.evidenceItem.deleteMany();
   await prisma.customerMessage.deleteMany();
   await prisma.trackingInfo.deleteMany();
   await prisma.order.deleteMany();
+  await prisma.transaction.deleteMany();
   await prisma.dispute.deleteMany();
-  await prisma.merchantSettings.deleteMany();
+  await prisma.payPalConnection.deleteMany();
+  await prisma.merchant.deleteMany();
 
-  // Create default merchant settings
-  await prisma.merchantSettings.create({
+  // 2. Create Default Merchant (Default configuration requires human approval!)
+  const merchant = await prisma.merchant.create({
     data: {
-      id: "default",
+      id: "default_merchant",
       businessName: "Apex Gear Outfitters",
       supportEmail: "support@apexgear.example.com",
-      paypalClientId: "",
-      paypalClientSecret: "",
-      paypalEnvironment: "sandbox",
-      openAiApiKey: "",
-      autoAnalyzeOnArrival: true,
+      requireHumanApproval: true, // DEFAULT REQUIREMENT: Human approval mandatory
       strictEvidenceEnforced: true,
-      webhookSecret: "WH-SIM-99281-AUTOHACKATHON",
+      autoAnalyzeOnArrival: true,
+      paypalConnection: {
+        create: {
+          environment: "sandbox",
+          status: "SIMULATION",
+          clientId: "",
+          clientSecret: "",
+          webhookId: "WH-SIM-99281-AUTOHACKATHON",
+          lastSyncAt: new Date(),
+        },
+      },
     },
   });
 
-  const now = new Date();
-
-  // 1. Case 1: High Win Potential INR (Item Not Received) with UPS signature
+  // 3. Case 1: "PP-D-91042" - State: NEEDS_REVIEW (High win potential INR with UPS signature)
   const dispute1 = await prisma.dispute.create({
     data: {
+      merchantId: merchant.id,
       paypalDisputeId: "PP-D-91042",
       status: "REQUIRED_ACTION",
       disputeLifeCycleStage: "CHARGEBACK",
@@ -45,14 +55,25 @@ async function main() {
       buyerId: "BUYER-88412",
       buyerName: "Marcus Vance",
       buyerEmail: "marcus.vance@example.com",
-      sellerTransactionId: "TXN-839218491",
       createTime: new Date(Date.now() - 2 * 24 * 3600 * 1000),
       responseDueDate: new Date(Date.now() + 5 * 24 * 3600 * 1000),
-      externalReasonCode: "INSUFFICIENT_FULFILLMENT_PROOF",
       merchantNotes: "Buyer filed chargeback claiming package never arrived. UPS tracking indicates signed delivery.",
-      aiAnalyzed: true,
-      aiConfidenceScore: 94,
-      aiRecommendedAction: "PROVIDE_EVIDENCE",
+      responseWorkflowStatus: "NEEDS_REVIEW", // Distinct state
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-839218491",
+          paypalTransactionId: "PAYPAL-TXN-839218491",
+          grossAmount: 289.50,
+          feeAmount: 8.68,
+          netAmount: 280.82,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+          payerId: "PAYER-MV88412",
+          payerEmail: "marcus.vance@example.com",
+          transactionTime: new Date(Date.now() - 12 * 24 * 3600 * 1000),
+        },
+      },
       order: {
         create: {
           orderNumber: "AG-94812",
@@ -67,7 +88,7 @@ async function main() {
             { description: "Apex Ultra-Lite Carbon Trekking Poles (Pair)", sku: "AG-POLE-CARB", qty: 1, price: 189.50 },
             { description: "Waterproof Alpine Summit Gaiters (L)", sku: "AG-GAIT-L", qty: 1, price: 100.00 },
           ]),
-          paymentMethod: "PayPal Express Checkout",
+          fulfillmentStatus: "FULFILLED",
         },
       },
       trackingInfo: {
@@ -80,30 +101,7 @@ async function main() {
           destinationZip: "97477",
           signedBy: "M. VANCE",
           deliveryProofUrl: "https://carriers.example.com/proofs/ups-1z9999999999999999.pdf",
-          checkpointHistory: JSON.stringify([
-            { time: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(), location: "Portland, OR", activity: "Origin Scan" },
-            { time: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString(), location: "Eugene, OR", activity: "Out for Delivery" },
-            { time: new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString(), location: "Springfield, OR", activity: "Delivered - Signed by M. VANCE" },
-          ]),
         },
-      },
-      messages: {
-        create: [
-          {
-            sender: "BUYER",
-            channel: "PAYPAL_MESSAGE",
-            timestamp: new Date(Date.now() - 48 * 3600 * 1000),
-            messageText: "I did not receive my poles and gaiters. Tracking says delivered but I don't see it anywhere.",
-            sentiment: "FRUSTRATED",
-          },
-          {
-            sender: "MERCHANT",
-            channel: "PAYPAL_MESSAGE",
-            timestamp: new Date(Date.now() - 36 * 3600 * 1000),
-            messageText: "Hi Marcus, thank you for reaching out. UPS recorded delivery on Oct 15th signed by M. VANCE. Please check with your front desk or household members.",
-            sentiment: "NEUTRAL",
-          },
-        ],
       },
       evidenceItems: {
         create: [
@@ -111,43 +109,32 @@ async function main() {
             evidenceType: "PROOF_OF_DELIVERY",
             title: "UPS Delivery Confirmation & Signature Record",
             description: "Official UPS carrier manifest with signature confirmation from M. VANCE at destination zip 97477.",
-            fileUrl: "/evidence/ups_signed_receipt_94812.pdf",
             fileName: "ups_signed_receipt_94812.pdf",
+            fileUrl: "/evidence/ups_signed_receipt_94812.pdf",
             fileType: "application/pdf",
-            fileSize: 428000,
             strength: "STRONG",
             verified: true,
+            provenanceSource: "UPS Electronic Tracking API",
           },
           {
             evidenceType: "PROOF_OF_FULFILLMENT",
             title: "Order Invoice & Warehouse Pack Slip",
             description: "System invoice detailing purchased line items, buyer billing/shipping address match, and transaction ID.",
-            fileUrl: "/evidence/order_invoice_AG-94812.pdf",
             fileName: "order_invoice_AG-94812.pdf",
+            fileUrl: "/evidence/order_invoice_AG-94812.pdf",
             fileType: "application/pdf",
-            fileSize: 182000,
             strength: "STRONG",
             verified: true,
-          },
-          {
-            evidenceType: "TERMS_OF_SERVICE",
-            title: "Published Return and Dispute Policy",
-            description: "Apex Gear Outfitters verified customer terms of sale and lost shipment resolution procedure.",
-            fileUrl: "/evidence/apex_terms_policy.pdf",
-            fileName: "apex_terms_policy.pdf",
-            fileType: "application/pdf",
-            fileSize: 94000,
-            strength: "MODERATE",
-            verified: true,
+            provenanceSource: "Apex Store ERP",
           },
         ],
       },
-      analysis: {
+      aiAnalysis: {
         create: {
-          summary: "Dispute PP-D-91042 (MERCHANDISE_OR_SERVICE_NOT_RECEIVED) for USD 289.50. 4 verified evidence points found. Evidence Completeness evaluated at 94%. Recommended Action: PROVIDE_EVIDENCE.",
+          summary: "Dispute PP-D-91042 (MERCHANDISE_OR_SERVICE_NOT_RECEIVED) for USD 289.50. 4 verified evidence points found. Evidence Completeness: 94%. Recommended Action: PROVIDE_EVIDENCE.",
           completenessScore: 94,
           recommendedAction: "PROVIDE_EVIDENCE",
-          recommendationRationale: "Strong merchant defense: Order #AG-94812 has verified carrier delivery via UPS to the customer's specified address with electronic signature 'M. VANCE'. Fulfills PayPal Seller Protection requirements.",
+          recommendationRationale: "Strong merchant defense: Order #AG-94812 has verified carrier delivery via UPS with electronic signature 'M. VANCE'. Fulfills PayPal Seller Protection requirements.",
           keyStrengthsJson: JSON.stringify([
             "Verifiable Order #AG-94812 matching buyer email marcus.vance@example.com.",
             "Confirmed carrier delivery via UPS (Tracking: 1Z9999999999999999).",
@@ -157,21 +144,66 @@ async function main() {
           criticalGapsJson: JSON.stringify([
             "None. All fulfillment and delivery milestones are documented with verifiable provenance.",
           ]),
-          rebuttalDraft: `To the PayPal Dispute Review Team,\n\nRegarding Dispute PP-D-91042 for transaction TXN-839218491 in the amount of USD 289.50:\n\n1. ORDER & PURCHASE VALIDATION:\nCustomer Marcus Vance placed Order #AG-94812 on the purchase date for 1x Apex Ultra-Lite Carbon Trekking Poles (Pair), 1x Waterproof Alpine Summit Gaiters (L). The shipping address provided and authorized during checkout was: 742 Evergreen Terrace, Apt 4B, Springfield, OR 97477.\n\n2. FULFILLMENT & DELIVERY DETAILS:\nThe order was fulfilled and dispatched via UPS under tracking number 1Z9999999999999999. According to official carrier records, the status is DELIVERED with delivery accepted and signed by "M. VANCE".\n\n3. SUPPORTING DOCUMENTATION ATTACHED:\n- UPS Delivery Confirmation & Signature Record: Official UPS carrier manifest with signature confirmation from M. VANCE at destination zip 97477.\n- Order Invoice & Warehouse Pack Slip: System invoice detailing purchased line items, buyer billing/shipping address match, and transaction ID.\n\nWe respectfully provide this factual documentation for your review in accordance with PayPal Seller Protection guidelines.\n\nSincerely,\nMerchant Operations Team`,
           citationsJson: JSON.stringify([
-            { fact: "Order #AG-94812 matching buyer email marcus.vance@example.com", source: "Merchant ERP / Order Database (#AG-94812)", verified: true },
-            { fact: "UPS Tracking #1Z9999999999999999 with status DELIVERED", source: "UPS Carrier API Integration", verified: true },
-            { fact: "Direct recipient signature obtained: M. VANCE", source: "UPS Electronic Signature Confirmation", verified: true },
+            { fact: "Order #AG-94812 matching buyer email", source: "Merchant ERP (#AG-94812)", verified: true },
+            { fact: "UPS Tracking #1Z9999999999999999 delivered", source: "UPS Carrier API", verified: true },
+            { fact: "Direct recipient signature: M. VANCE", source: "UPS Signature Service", verified: true },
           ]),
           riskLevel: "LOW",
+          antiHallucinationVerified: true,
+          modelUsed: "deterministic-factual-engine",
         },
+      },
+      draftResponses: {
+        create: [
+          {
+            version: 1,
+            status: "NEEDS_REVIEW", // DISTINCT STATE: Needs review
+            targetAction: "PROVIDE_EVIDENCE",
+            rebuttalNarrative: `To the PayPal Dispute Review Team,\n\nRegarding Dispute PP-D-91042 for transaction TXN-839218491 in the amount of USD 289.50:\n\n1. ORDER & PURCHASE VALIDATION:\nCustomer Marcus Vance placed Order #AG-94812 for 1x Apex Ultra-Lite Carbon Trekking Poles, 1x Waterproof Alpine Summit Gaiters. Address authorized at checkout was: 742 Evergreen Terrace, Apt 4B, Springfield, OR 97477.\n\n2. FULFILLMENT & DELIVERY DETAILS:\nThe order was dispatched via UPS under tracking number 1Z9999999999999999. Carrier records confirm delivery with signature obtained from "M. VANCE".\n\nRespectfully submitted,\nMerchant Operations`,
+            characterCount: 520,
+            isApproved: false,
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "DISPUTE_CREATED",
+            severity: "INFO",
+            summary: "Dispute PP-D-91042 ingested for transaction TXN-839218491",
+            detailsJson: JSON.stringify({ amount: 289.50, reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED" }),
+            actor: "system_webhook",
+            timestamp: new Date(Date.now() - 48 * 3600 * 1000),
+          },
+          {
+            merchantId: merchant.id,
+            eventType: "EVIDENCE_RETRIEVED",
+            severity: "INFO",
+            summary: "UPS carrier tracking and delivery signature retrieved for tracking 1Z9999999999999999",
+            detailsJson: JSON.stringify({ carrier: "UPS", signedBy: "M. VANCE", status: "DELIVERED" }),
+            actor: "ai_agent",
+            timestamp: new Date(Date.now() - 47 * 3600 * 1000),
+          },
+          {
+            merchantId: merchant.id,
+            eventType: "AI_ANALYSIS_GENERATED",
+            severity: "SUCCESS",
+            summary: "AI generated evidence completeness score of 94% with zero critical gaps",
+            detailsJson: JSON.stringify({ completeness: 94, recommendedAction: "PROVIDE_EVIDENCE" }),
+            actor: "ai_agent",
+            timestamp: new Date(Date.now() - 46 * 3600 * 1000),
+          },
+        ],
       },
     },
   });
 
-  // 2. Case 2: "Item Not as Described" (SNAD) with missing pick-pack photo gap
+  // 4. Case 2: "PP-D-83910" - State: DRAFT (Item Not as Described, missing pick-pack photo)
   const dispute2 = await prisma.dispute.create({
     data: {
+      merchantId: merchant.id,
       paypalDisputeId: "PP-D-83910",
       status: "REQUIRED_ACTION",
       disputeLifeCycleStage: "CLAIM",
@@ -181,14 +213,19 @@ async function main() {
       buyerId: "BUYER-77192",
       buyerName: "Elena Rostova",
       buyerEmail: "elena.r@example.com",
-      sellerTransactionId: "TXN-746291038",
       createTime: new Date(Date.now() - 3 * 24 * 3600 * 1000),
       responseDueDate: new Date(Date.now() + 2 * 24 * 3600 * 1000),
-      externalReasonCode: "PRODUCT_DEFECT_OR_DIFFERENT",
-      merchantNotes: "Buyer claims the parka arrived in wrong color (Navy instead of Black) with damaged seam.",
-      aiAnalyzed: true,
-      aiConfidenceScore: 56,
-      aiRecommendedAction: "OFFER_PARTIAL_REFUND",
+      merchantNotes: "Buyer claims the parka arrived in wrong color (Navy instead of Black).",
+      responseWorkflowStatus: "DRAFT", // DISTINCT STATE: Draft
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-746291038",
+          grossAmount: 420.00,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
       order: {
         create: {
           orderNumber: "AG-93205",
@@ -198,11 +235,9 @@ async function main() {
           shippingAddress: "1088 Sansome St, Fl 3, San Francisco, CA 94111",
           billingAddress: "1088 Sansome St, Fl 3, San Francisco, CA 94111",
           orderTotal: 420.00,
-          currency: "USD",
           itemsJson: JSON.stringify([
             { description: "Apex Arctic Expedition Down Parka (L, Obsidian Black)", sku: "AG-PARKA-BLK-L", qty: 1, price: 420.00 },
           ]),
-          paymentMethod: "PayPal",
         },
       },
       trackingInfo: {
@@ -210,67 +245,67 @@ async function main() {
           carrier: "FEDEX",
           trackingNumber: "782910482019",
           status: "DELIVERED",
-          shippedDate: new Date(Date.now() - 14 * 24 * 3600 * 1000),
-          deliveredDate: new Date(Date.now() - 9 * 24 * 3600 * 1000),
           destinationZip: "94111",
           signedBy: "E. ROSTOVA",
-          deliveryProofUrl: "https://carriers.example.com/proofs/fedex-782910482019.pdf",
         },
       },
-      messages: {
-        create: [
-          {
-            sender: "BUYER",
-            channel: "PAYPAL_MESSAGE",
-            timestamp: new Date(Date.now() - 50 * 3600 * 1000),
-            messageText: "The jacket sent to me has loose stitching on the chest baffle and looks like dark midnight navy rather than jet black. I want a refund.",
-            sentiment: "FRUSTRATED",
-          },
-        ],
-      },
-      evidenceItems: {
-        create: [
-          {
-            evidenceType: "PROOF_OF_FULFILLMENT",
-            title: "Original Product Catalog Specifications",
-            description: "Product page technical specification showing fabric, color palette and manufacturer warranty.",
-            fileName: "product_spec_obsidian_parka.pdf",
-            fileType: "application/pdf",
-            fileSize: 310000,
-            strength: "MODERATE",
-            verified: true,
-          },
-        ],
-      },
-      analysis: {
+      aiAnalysis: {
         create: {
-          summary: "Dispute PP-D-83910 (MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED) for USD 420.00. Evidence Completeness: 56%. Missing warehouse pack photo. Recommended Action: OFFER_PARTIAL_REFUND.",
+          summary: "Dispute PP-D-83910 (SNAD). Evidence Completeness: 56%. Missing warehouse pack photo. Recommended: OFFER_PARTIAL_REFUND.",
           completenessScore: 56,
           recommendedAction: "OFFER_PARTIAL_REFUND",
-          recommendationRationale: "Buyer claims item is significantly not as described (color mismatch & stitching). Merchant lacks warehouse pick-pack photography or serial logging. Offering a partial refund ($80-$120) or prepaid return label avoids complete loss and chargeback processing fees.",
+          recommendationRationale: "Buyer claims item is significantly not as described. Merchant lacks warehouse pack photo. Offering a 25% courtesy refund avoids chargeback dispute fees.",
           keyStrengthsJson: JSON.stringify([
             "Item was successfully delivered and signed for by buyer.",
             "Order invoice confirms buyer chose SKU AG-PARKA-BLK-L.",
-            "Return policy requires item to be returned in original packaging for full refund.",
           ]),
           criticalGapsJson: JSON.stringify([
-            "CRITICAL GAP: Missing warehouse pre-shipment photo proving condition and color before sealing box.",
-            "No recorded inspection log or manufacturer QC certificate attached to shipment.",
+            "CRITICAL GAP: Missing warehouse pre-shipment photo proving color/condition before sealing package.",
           ]),
-          rebuttalDraft: `To the PayPal Dispute Resolution Team,\n\nRegarding Dispute PP-D-83910 for transaction TXN-746291038 in the amount of USD 420.00:\n\n1. TRANSACTION CONTEXT:\nCustomer Elena Rostova ordered the Apex Arctic Expedition Down Parka (SKU: AG-PARKA-BLK-L) on the recorded date. The item was fulfilled and verified delivered via FedEx Tracking 782910482019.\n\n2. MERCHANT SETTLEMENT POSITION:\nOur products undergo strict manufacturer batch quality checks. To provide immediate customer satisfaction while preserving the integrity of the purchase, we are prepared to offer a 25% courtesy settlement ($105.00) or issue a prepaid return authorization label for a full refund upon receipt.\n\nSincerely,\nMerchant Operations Team`,
           citationsJson: JSON.stringify([
             { fact: "Order #AG-93205 placed for SKU AG-PARKA-BLK-L", source: "Merchant ERP", verified: true },
-            { fact: "FedEx Tracking #782910482019 delivered", source: "FedEx Carrier API", verified: true },
           ]),
           riskLevel: "MEDIUM",
         },
       },
+      draftResponses: {
+        create: [
+          {
+            version: 1,
+            status: "DRAFT",
+            targetAction: "MAKE_OFFER",
+            rebuttalNarrative: "Offering partial refund of $105.00 to resolve dispute amicably.",
+            characterCount: 65,
+            partialOfferAmount: 105.00,
+            isApproved: false,
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "DISPUTE_CREATED",
+            severity: "INFO",
+            summary: "Dispute PP-D-83910 created via PayPal Webhook",
+            actor: "system_webhook",
+          },
+          {
+            merchantId: merchant.id,
+            eventType: "AI_ANALYSIS_GENERATED",
+            severity: "WARNING",
+            summary: "AI gap analysis flagged missing warehouse pack photo; recommended partial refund",
+            actor: "ai_agent",
+          },
+        ],
+      },
     },
   });
 
-  // 3. Case 3: "Urgent Deadline Expiring in 3 Hours!"
+  // 5. Case 3: "PP-D-61023" - State: APPROVED (Urgent deadline expiring in 3 hours, human approved, ready to submit)
   const dispute3 = await prisma.dispute.create({
     data: {
+      merchantId: merchant.id,
       paypalDisputeId: "PP-D-61023",
       status: "REQUIRED_ACTION",
       disputeLifeCycleStage: "CHARGEBACK",
@@ -280,15 +315,19 @@ async function main() {
       buyerId: "BUYER-33901",
       buyerName: "Tariq Morales",
       buyerEmail: "tariq.m@example.com",
-      sellerTransactionId: "TXN-901847112",
       createTime: new Date(Date.now() - 9 * 24 * 3600 * 1000),
-      // Set due date to 3 hours from now!
-      responseDueDate: new Date(Date.now() + 3 * 3600 * 1000),
-      externalReasonCode: "BUYER_DISPUTE_DEADLINE_APPROACHING",
-      merchantNotes: "URGENT: Dispute deadline expires today in under 3 hours! Needs immediate evidence submission to avoid default forfeiture.",
-      aiAnalyzed: true,
-      aiConfidenceScore: 91,
-      aiRecommendedAction: "PROVIDE_EVIDENCE",
+      responseDueDate: new Date(Date.now() + 3 * 3600 * 1000), // In 3 hours!
+      merchantNotes: "Dispute response approved by merchant manager. Ready for PayPal API dispatch.",
+      responseWorkflowStatus: "APPROVED", // DISTINCT STATE: Approved
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-901847112",
+          grossAmount: 79.99,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
       order: {
         create: {
           orderNumber: "AG-95110",
@@ -298,11 +337,9 @@ async function main() {
           shippingAddress: "320 West 42nd Street, Apt 11C, New York, NY 10036",
           billingAddress: "320 West 42nd Street, Apt 11C, New York, NY 10036",
           orderTotal: 79.99,
-          currency: "USD",
           itemsJson: JSON.stringify([
             { description: "Apex Trail Runner Hydration Vest (12L)", sku: "AG-VEST-12L", qty: 1, price: 79.99 },
           ]),
-          paymentMethod: "PayPal",
         },
       },
       trackingInfo: {
@@ -310,65 +347,77 @@ async function main() {
           carrier: "USPS",
           trackingNumber: "9400111899223190284712",
           status: "DELIVERED",
-          shippedDate: new Date(Date.now() - 12 * 24 * 3600 * 1000),
-          deliveredDate: new Date(Date.now() - 8 * 24 * 3600 * 1000),
           destinationZip: "10036",
-          signedBy: "Front Desk / Concierge (T. MORALES)",
-          deliveryProofUrl: "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223190284712",
+          signedBy: "T. MORALES",
         },
-      },
-      messages: {
-        create: [
-          {
-            sender: "BUYER",
-            channel: "PAYPAL_MESSAGE",
-            timestamp: new Date(Date.now() - 72 * 3600 * 1000),
-            messageText: "Package was not found in my building mailroom.",
-            sentiment: "NEUTRAL",
-          },
-        ],
       },
       evidenceItems: {
         create: [
           {
             evidenceType: "PROOF_OF_DELIVERY",
-            title: "USPS Electronic Delivery Confirmation (Zip 10036)",
-            description: "Official USPS carrier delivery scan to building reception in New York, NY 10036.",
-            fileName: "usps_delivery_confirmation_95110.pdf",
+            title: "USPS Official Delivery Confirmation",
+            description: "Carrier confirmed delivery to building mailroom zip 10036.",
+            fileName: "usps_pod_95110.pdf",
             fileType: "application/pdf",
-            fileSize: 154000,
             strength: "STRONG",
             verified: true,
           },
         ],
       },
-      analysis: {
+      aiAnalysis: {
         create: {
-          summary: "Dispute PP-D-61023 (MERCHANDISE_OR_SERVICE_NOT_RECEIVED) for USD 79.99. URGENT: Response deadline expires in 3 hours. Carrier confirmed delivery to zip 10036. Recommended: SUBMIT EVIDENCE IMMEDIATELY.",
+          summary: "Dispute PP-D-61023 (INR). URGENT: 3h left. Completeness: 91%. Recommended: SUBMIT EVIDENCE.",
           completenessScore: 91,
           recommendedAction: "PROVIDE_EVIDENCE",
-          recommendationRationale: "USPS carrier delivery timestamp and zip code (10036) directly match buyer's shipping address. Case is fully documented and ready for 1-click submission.",
-          keyStrengthsJson: JSON.stringify([
-            "Official USPS tracking confirms delivery to destination zip 10036.",
-            "Order details match authorized checkout data.",
-            "Evidence meets all PayPal Seller Protection requirements.",
-          ]),
-          criticalGapsJson: JSON.stringify([
-            "URGENCY GAP: Deadline is under 3 hours. Action required now to prevent automatic buyer default award.",
-          ]),
-          rebuttalDraft: `To PayPal Dispute Resolution Team,\n\nRegarding Dispute PP-D-61023 for USD 79.99 (Order #AG-95110):\nFulfillment record demonstrates shipment via USPS under tracking 9400111899223190284712 to 320 West 42nd Street, Apt 11C, New York, NY 10036. Official USPS records confirm delivery to the address.\n\nRespectfully submitted,\nMerchant Operations`,
-          citationsJson: JSON.stringify([
-            { fact: "USPS Tracking #9400111899223190284712 delivered", source: "USPS Carrier API", verified: true },
-          ]),
+          recommendationRationale: "USPS delivery record matches authorized shipping destination zip.",
+          keyStrengthsJson: JSON.stringify(["USPS confirmed delivery to zip 10036"]),
+          criticalGapsJson: JSON.stringify(["Urgent deadline expiring today"]),
+          citationsJson: JSON.stringify([{ fact: "USPS Tracking #9400111899223190284712 delivered", source: "USPS API", verified: true }]),
           riskLevel: "LOW",
         },
+      },
+      draftResponses: {
+        create: [
+          {
+            version: 1,
+            status: "APPROVED",
+            targetAction: "PROVIDE_EVIDENCE",
+            rebuttalNarrative: "Factual rebuttal verified and approved for immediate dispatch.",
+            characterCount: 62,
+            isApproved: true,
+            approvedBy: "merchant_compliance_officer",
+            approvedAt: new Date(Date.now() - 30 * 60 * 1000),
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "RESPONSE_EDITED",
+            severity: "INFO",
+            summary: "Merchant edited rebuttal narrative with USPS tracking reference",
+            actor: "merchant_user",
+            timestamp: new Date(Date.now() - 45 * 60 * 1000),
+          },
+          {
+            merchantId: merchant.id,
+            eventType: "APPROVAL_GRANTED",
+            severity: "SUCCESS",
+            summary: "Human approval granted by compliance officer. Ready for PayPal Disputes API submission.",
+            actor: "merchant_user",
+            actorId: "compliance_officer_1",
+            timestamp: new Date(Date.now() - 30 * 60 * 1000),
+          },
+        ],
       },
     },
   });
 
-  // 4. Case 4: "Unauthorised Transaction" (AVS / Seller Protection Match)
+  // 6. Case 4: "PP-D-72149" - State: SUBMISSION_FAILED (Simulated transient error with retry capability)
   const dispute4 = await prisma.dispute.create({
     data: {
+      merchantId: merchant.id,
       paypalDisputeId: "PP-D-72149",
       status: "WAITING_FOR_SELLER",
       disputeLifeCycleStage: "INQUIRY",
@@ -378,12 +427,19 @@ async function main() {
       buyerId: "BUYER-55209",
       buyerName: "Chloe Davenport",
       buyerEmail: "chloe.davenport@example.com",
-      sellerTransactionId: "TXN-552190884",
       createTime: new Date(Date.now() - 1 * 24 * 3600 * 1000),
       responseDueDate: new Date(Date.now() + 8 * 24 * 3600 * 1000),
-      externalReasonCode: "FRAUD_CLAIM_CARD_NOT_PRESENT",
-      merchantNotes: "Buyer states card was used without authorization. Checkout passed 3D Secure / AVS match.",
-      aiAnalyzed: false,
+      merchantNotes: "Submission attempt failed due to PayPal Sandbox rate limiting / timeout. Ready for retry.",
+      responseWorkflowStatus: "SUBMISSION_FAILED", // DISTINCT STATE: Submission failed
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-552190884",
+          grossAmount: 165.00,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
       order: {
         create: {
           orderNumber: "AG-95620",
@@ -393,11 +449,9 @@ async function main() {
           shippingAddress: "450 North Brand Blvd, Suite 700, Glendale, CA 91203",
           billingAddress: "450 North Brand Blvd, Suite 700, Glendale, CA 91203",
           orderTotal: 165.00,
-          currency: "USD",
           itemsJson: JSON.stringify([
             { description: "Apex Merino 250 Thermal Base Layer Set", sku: "AG-BASE-M250", qty: 1, price: 165.00 },
           ]),
-          paymentMethod: "PayPal Verified Checkout",
         },
       },
       trackingInfo: {
@@ -405,33 +459,69 @@ async function main() {
           carrier: "FEDEX",
           trackingNumber: "774910284910",
           status: "DELIVERED",
-          shippedDate: new Date(Date.now() - 5 * 24 * 3600 * 1000),
-          deliveredDate: new Date(Date.now() - 2 * 24 * 3600 * 1000),
           destinationZip: "91203",
           signedBy: "C. DAVENPORT",
-          deliveryProofUrl: "https://fedex.example.com/proofs/774910284910.pdf",
         },
       },
-      evidenceItems: {
+      draftResponses: {
         create: [
           {
-            evidenceType: "PROOF_OF_DELIVERY",
-            title: "FedEx Signed Proof of Delivery to Billing Address",
-            description: "Proof of delivery signed by C. Davenport at the exact billing address authorized in PayPal checkout.",
-            fileName: "fedex_pod_glendale.pdf",
-            fileType: "application/pdf",
-            fileSize: 215000,
-            strength: "STRONG",
-            verified: true,
+            version: 1,
+            status: "APPROVED",
+            targetAction: "PROVIDE_EVIDENCE",
+            rebuttalNarrative: "Transaction verified with FedEx signature at authorized billing address.",
+            characterCount: 78,
+            isApproved: true,
+            approvedBy: "merchant_user",
+          },
+        ],
+      },
+      submissionAttempts: {
+        create: [
+          {
+            action: "PROVIDE_EVIDENCE",
+            attemptNumber: 1,
+            status: "SUBMISSION_FAILED",
+            endpoint: "/v1/customer/disputes/PP-D-72149/provide-evidence",
+            httpStatusCode: 504,
+            errorMessage: "PayPal Sandbox gateway timeout (504). Downstream dispute service temporarily unavailable.",
+            requestPayloadSanitized: JSON.stringify({ disputeId: "PP-D-72149", evidenceType: "PROOF_OF_DELIVERY" }),
+            responsePayloadSanitized: JSON.stringify({ error: "GATEWAY_TIMEOUT", message: "Downstream service timeout" }),
+            isRetry: false,
+            retryCount: 0,
+            attemptedAt: new Date(Date.now() - 2 * 3600 * 1000),
+            completedAt: new Date(Date.now() - 2 * 3600 * 1000 + 45000),
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "SUBMISSION_ATTEMPTED",
+            severity: "INFO",
+            summary: "Dispatched provide-evidence request to PayPal Disputes API",
+            actor: "merchant_user",
+            timestamp: new Date(Date.now() - 2 * 3600 * 1000),
+          },
+          {
+            merchantId: merchant.id,
+            eventType: "SUBMISSION_FAILED",
+            severity: "ERROR",
+            summary: "PayPal Disputes API returned 504 Gateway Timeout. Marked for retry.",
+            detailsJson: JSON.stringify({ httpStatus: 504, error: "GATEWAY_TIMEOUT" }),
+            actor: "paypal_api",
+            timestamp: new Date(Date.now() - 2 * 3600 * 1000 + 45000),
           },
         ],
       },
     },
   });
 
-  // 5. Case 5: Historical Resolved / Won Dispute with full audit trail
+  // 7. Case 5: "PP-D-50218" - State: SUBMITTED & RESOLVED (Successful PayPal 200 OK result received)
   const dispute5 = await prisma.dispute.create({
     data: {
+      merchantId: merchant.id,
       paypalDisputeId: "PP-D-50218",
       status: "RESOLVED",
       disputeLifeCycleStage: "CHARGEBACK",
@@ -441,14 +531,20 @@ async function main() {
       buyerId: "BUYER-22019",
       buyerName: "Julian Thorne",
       buyerEmail: "j.thorne@example.com",
-      sellerTransactionId: "TXN-441092831",
       createTime: new Date(Date.now() - 20 * 24 * 3600 * 1000),
       responseDueDate: new Date(Date.now() - 10 * 24 * 3600 * 1000),
-      merchantNotes: "Dispute decided in merchant favor by PayPal review team after evidence submitted by AutoSettle AI.",
-      aiAnalyzed: true,
-      aiConfidenceScore: 98,
-      aiRecommendedAction: "PROVIDE_EVIDENCE",
+      merchantNotes: "Dispute decided in merchant favor by PayPal review team after verified evidence submission.",
       resolutionOutcome: "WON",
+      responseWorkflowStatus: "SUBMITTED", // DISTINCT STATE: Submitted (only after successful PayPal result!)
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-441092831",
+          grossAmount: 540.00,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
       order: {
         create: {
           orderNumber: "AG-92100",
@@ -458,11 +554,9 @@ async function main() {
           shippingAddress: "1200 Westlake Ave N, Seattle, WA 98109",
           billingAddress: "1200 Westlake Ave N, Seattle, WA 98109",
           orderTotal: 540.00,
-          currency: "USD",
           itemsJson: JSON.stringify([
             { description: "Apex 4-Season All-Weather Geodesic Tent", sku: "AG-TENT-4S", qty: 1, price: 540.00 },
           ]),
-          paymentMethod: "PayPal",
         },
       },
       trackingInfo: {
@@ -470,75 +564,80 @@ async function main() {
           carrier: "UPS",
           trackingNumber: "1Z8888888888888888",
           status: "DELIVERED",
-          shippedDate: new Date(Date.now() - 25 * 24 * 3600 * 1000),
-          deliveredDate: new Date(Date.now() - 22 * 24 * 3600 * 1000),
           destinationZip: "98109",
           signedBy: "J. THORNE",
         },
       },
-      analysis: {
-        create: {
-          summary: "Dispute PP-D-50218 successfully defended with 98% completeness. Full delivery signature and invoice verified.",
-          completenessScore: 98,
-          recommendedAction: "PROVIDE_EVIDENCE",
-          recommendationRationale: "Complete fulfillment record with UPS signature match.",
-          keyStrengthsJson: JSON.stringify([
-            "Verifiable delivery with UPS signature confirmation.",
-            "Billing and shipping address match.",
-          ]),
-          criticalGapsJson: JSON.stringify([]),
-          rebuttalDraft: "Factual rebuttal submitted with proof of delivery.",
-          citationsJson: JSON.stringify([
-            { fact: "UPS Delivered to 98109", source: "UPS Tracking", verified: true },
-          ]),
-          riskLevel: "LOW",
-        },
+      submissionAttempts: {
+        create: [
+          {
+            action: "PROVIDE_EVIDENCE",
+            attemptNumber: 1,
+            status: "SUBMITTED", // Exact submitted state!
+            endpoint: "/v1/customer/disputes/PP-D-50218/provide-evidence",
+            httpStatusCode: 200,
+            requestPayloadSanitized: JSON.stringify({
+              disputeId: "PP-D-50218",
+              evidenceType: "PROOF_OF_DELIVERY",
+              tracking: "1Z8888888888888888",
+            }),
+            responsePayloadSanitized: JSON.stringify({
+              status: "UNDER_REVIEW",
+              message: "Evidence successfully accepted by PayPal Disputes API.",
+              acknowledged_at: new Date(Date.now() - 18 * 24 * 3600 * 1000).toISOString(),
+            }),
+            isRetry: false,
+            attemptedAt: new Date(Date.now() - 18 * 24 * 3600 * 1000),
+            completedAt: new Date(Date.now() - 18 * 24 * 3600 * 1000 + 1200),
+          },
+        ],
+      },
+      webhookEvents: {
+        create: [
+          {
+            paypalWebhookEventId: "WH-DEDUP-RESOLVE-50218", // Unique deduplication constraint
+            eventType: "PAYMENT.DISPUTE.RESOLVED",
+            summary: "Dispute decided in merchant favor with Seller Protection granted",
+            status: "PROCESSED",
+            signatureVerified: true,
+            payloadSanitized: JSON.stringify({ outcome: "RESOLVED_BUYER_FAVOUR_NO", protection: "ELIGIBLE" }),
+            receivedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000),
+          },
+        ],
       },
       auditLogs: {
         create: [
           {
-            action: "AUTO_ANALYZED",
-            status: "SUCCESS",
-            payloadSent: JSON.stringify({ mode: "auto_intake", score: 98 }),
-            paypalResponse: null,
-            submittedBy: "autosettle_agent",
-            submittedAt: new Date(Date.now() - 19 * 24 * 3600 * 1000),
+            merchantId: merchant.id,
+            eventType: "SUBMISSION_ATTEMPTED",
+            severity: "INFO",
+            summary: "Evidence payload dispatched to PayPal Disputes API",
+            actor: "merchant_user",
+            timestamp: new Date(Date.now() - 18 * 24 * 3600 * 1000),
           },
           {
-            action: "PROVIDE_EVIDENCE",
-            status: "SUCCESS",
-            payloadSent: JSON.stringify({
-              evidence_type: "PROOF_OF_DELIVERY",
-              carrier_name: "UPS",
-              tracking_number: "1Z8888888888888888",
-              notes: "Evidence provided via AutoSettle AI",
-            }),
-            paypalResponse: JSON.stringify({
-              status: "UNDER_REVIEW",
-              acknowledged_at: new Date(Date.now() - 18 * 24 * 3600 * 1000).toISOString(),
-              http_code: 200,
-            }),
-            submittedBy: "merchant_authorized",
-            submittedAt: new Date(Date.now() - 18 * 24 * 3600 * 1000),
+            merchantId: merchant.id,
+            eventType: "API_RESULT_RECEIVED",
+            severity: "SUCCESS",
+            summary: "PayPal returned 200 OK: Evidence successfully acknowledged and case placed UNDER_REVIEW",
+            detailsJson: JSON.stringify({ httpStatus: 200, status: "UNDER_REVIEW" }),
+            actor: "paypal_api",
+            timestamp: new Date(Date.now() - 18 * 24 * 3600 * 1000 + 1200),
           },
           {
-            action: "SYNC_STATUS",
-            status: "SUCCESS",
-            payloadSent: null,
-            paypalResponse: JSON.stringify({
-              dispute_id: "PP-D-50218",
-              status: "RESOLVED",
-              dispute_outcome: { outcome_code: "RESOLVED_BUYER_FAVOUR_NO", seller_protection: "ELIGIBLE" },
-            }),
-            submittedBy: "system_sync",
-            submittedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000),
+            merchantId: merchant.id,
+            eventType: "WEBHOOK_VERIFIED",
+            severity: "SUCCESS",
+            summary: "Received verified PayPal webhook PAYMENT.DISPUTE.RESOLVED. Decision: WON.",
+            actor: "system_webhook",
+            timestamp: new Date(Date.now() - 10 * 24 * 3600 * 1000),
           },
         ],
       },
     },
   });
 
-  console.log("✅ Seed completed successfully! Created 5 rich dispute test cases.");
+  console.log("✅ Seed completed successfully! Created full 11-model relational structure with distinct workflow states.");
 }
 
 main()

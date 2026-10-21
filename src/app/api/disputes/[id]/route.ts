@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function GET(
   req: NextRequest,
@@ -16,6 +17,7 @@ export async function GET(
         ],
       },
       include: {
+        transaction: true,
         order: true,
         trackingInfo: true,
         evidenceItems: {
@@ -24,9 +26,18 @@ export async function GET(
         messages: {
           orderBy: { timestamp: "asc" },
         },
-        analysis: true,
+        aiAnalysis: true,
+        draftResponses: {
+          orderBy: { version: "desc" },
+        },
+        submissionAttempts: {
+          orderBy: { attemptedAt: "desc" },
+        },
         auditLogs: {
-          orderBy: { submittedAt: "desc" },
+          orderBy: { timestamp: "desc" },
+        },
+        webhookEvents: {
+          orderBy: { receivedAt: "desc" },
         },
       },
     });
@@ -59,11 +70,51 @@ export async function PATCH(
     const { id } = params;
     const body = await req.json();
 
+    const dispute = await prisma.dispute.findFirst({
+      where: { OR: [{ id }, { paypalDisputeId: id }] },
+      include: { draftResponses: { orderBy: { version: "desc" }, take: 1 } },
+    });
+
+    if (!dispute) {
+      return NextResponse.json({ success: false, error: "Dispute not found" }, { status: 404 });
+    }
+
+    // Handle draft rebuttal edit
+    if (body.rebuttalNarrative !== undefined) {
+      const latestDraft = dispute.draftResponses[0];
+      if (latestDraft) {
+        await prisma.draftResponse.update({
+          where: { id: latestDraft.id },
+          data: {
+            rebuttalNarrative: body.rebuttalNarrative,
+            characterCount: body.rebuttalNarrative.length,
+            status: dispute.responseWorkflowStatus === "APPROVED" ? "NEEDS_REVIEW" : latestDraft.status,
+            editedBy: "merchant_user",
+            editedAt: new Date(),
+          },
+        });
+      }
+
+      await recordAuditLog({
+        disputeId: dispute.id,
+        eventType: "RESPONSE_EDITED",
+        severity: "INFO",
+        summary: "Merchant edited rebuttal narrative draft",
+        details: { characterCount: body.rebuttalNarrative.length },
+        actor: "merchant_user",
+      });
+    }
+
     const updated = await prisma.dispute.update({
-      where: { id },
+      where: { id: dispute.id },
       data: {
-        merchantNotes: body.merchantNotes,
-        status: body.status,
+        merchantNotes: body.merchantNotes !== undefined ? body.merchantNotes : dispute.merchantNotes,
+        responseWorkflowStatus: body.responseWorkflowStatus || dispute.responseWorkflowStatus,
+        status: body.status || dispute.status,
+      },
+      include: {
+        draftResponses: true,
+        auditLogs: { orderBy: { timestamp: "desc" } },
       },
     });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Settings, Shield, Key, Save, CheckCircle2, Lock } from "lucide-react";
+import { X, Settings, Key, Save, CheckCircle2, Lock, UserCheck } from "lucide-react";
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -14,7 +14,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
   const [paypalClientId, setPaypalClientId] = useState("");
   const [paypalClientSecret, setPaypalClientSecret] = useState("");
   const [paypalEnvironment, setPaypalEnvironment] = useState("sandbox");
-  const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [requireHumanApproval, setRequireHumanApproval] = useState(true); // DEFAULT: TRUE
   const [autoAnalyzeOnArrival, setAutoAnalyzeOnArrival] = useState(true);
   const [strictEvidenceEnforced, setStrictEvidenceEnforced] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -32,7 +32,9 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
           setPaypalClientId(data.settings.paypalClientId || "");
           setPaypalClientSecret(data.settings.paypalClientSecret || "");
           setPaypalEnvironment(data.settings.paypalEnvironment || "sandbox");
-          setOpenAiApiKey(data.settings.openAiApiKey || "");
+          setRequireHumanApproval(
+            data.settings.requireHumanApproval !== undefined ? Boolean(data.settings.requireHumanApproval) : true
+          );
           setAutoAnalyzeOnArrival(Boolean(data.settings.autoAnalyzeOnArrival));
           setStrictEvidenceEnforced(Boolean(data.settings.strictEvidenceEnforced));
         }
@@ -59,7 +61,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
           paypalClientId,
           paypalClientSecret,
           paypalEnvironment,
-          openAiApiKey,
+          requireHumanApproval,
           autoAnalyzeOnArrival,
           strictEvidenceEnforced,
         }),
@@ -94,9 +96,9 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
             <Settings className="w-5 h-5 text-sky-400" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">Merchant & Integration Settings</h3>
+            <h3 className="text-base font-bold text-white">Merchant & Policy Settings</h3>
             <p className="text-xs text-slate-400">
-              Configure PayPal Disputes API credentials and AI agent behavior.
+              Configure PayPal Disputes API credentials and human review governance.
             </p>
           </div>
         </div>
@@ -105,11 +107,10 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
           <div className="py-12 text-center text-xs text-slate-400">Loading settings...</div>
         ) : (
           <form onSubmit={handleSave} className="space-y-4">
-            {/* Business Info */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                  Business / Store Name
+                  Business Name
                 </label>
                 <input
                   type="text"
@@ -162,25 +163,27 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
                 </div>
               </div>
               <p className="text-[10px] text-slate-400">
-                Leave blank to use built-in high-fidelity Sandbox Simulation mode for judging/demo without active developer account credentials.
+                Leave blank to use built-in high-fidelity Sandbox Simulation mode with zero setup.
               </p>
             </div>
 
-            {/* Optional OpenAI API Key */}
-            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-              <span className="text-xs font-bold text-indigo-400 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5" /> OpenAI API Key (Optional)
-              </span>
-              <input
-                type="password"
-                value={openAiApiKey}
-                onChange={(e) => setOpenAiApiKey(e.target.value)}
-                placeholder="sk-proj-..."
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-200"
-              />
-              <p className="text-[10px] text-slate-400">
-                If omitted, AutoSettle AI's deterministic anti-hallucination reasoning engine is used with 100% offline uptime and zero API failures.
-              </p>
+            {/* MANDATORY HUMAN APPROVAL DEFAULT GOVERNANCE */}
+            <div className="p-3.5 rounded-xl bg-indigo-950/20 border border-indigo-500/30 space-y-2">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={requireHumanApproval}
+                  onChange={(e) => setRequireHumanApproval(e.target.checked)}
+                  className="mt-0.5 rounded text-indigo-600 bg-slate-950 border-slate-700"
+                />
+                <div className="text-xs text-slate-200">
+                  <strong className="text-indigo-300 block mb-0.5 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5" />
+                    Require Human Approval Before Submission (Default: Enabled)
+                  </strong>
+                  Prevents autonomous submissions to PayPal Disputes API without explicit human operator sign-off. Drafts remain in Needs Review until certified.
+                </div>
+              </label>
             </div>
 
             {/* Automation Toggles */}
@@ -192,7 +195,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
                   onChange={(e) => setAutoAnalyzeOnArrival(e.target.checked)}
                   className="rounded text-sky-600 bg-slate-950 border-slate-700"
                 />
-                <span>Autonomous Analysis: Automatically analyze evidence when a dispute webhook arrives</span>
+                <span>Autonomous Analysis: Run evidence gap analysis immediately when a dispute arrives</span>
               </label>
 
               <label className="flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
@@ -227,7 +230,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
                 className="flex items-center gap-2 px-5 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold transition-all shadow-md"
               >
                 <Save className={`w-3.5 h-3.5 ${isSaving ? "animate-spin" : ""}`} />
-                <span>{isSaving ? "Saving..." : "Save Settings"}</span>
+                <span>{isSaving ? "Saving..." : "Save Configuration"}</span>
               </button>
             </div>
           </form>

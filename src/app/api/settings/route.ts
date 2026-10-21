@@ -1,48 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function GET() {
   try {
-    let settings = await prisma.merchantSettings.findFirst({
-      where: { id: "default" },
+    let merchant = await prisma.merchant.findFirst({
+      where: { id: "default_merchant" },
+      include: {
+        paypalConnection: true,
+      },
     });
 
-    if (!settings) {
-      settings = await prisma.merchantSettings.create({
+    if (!merchant) {
+      merchant = await prisma.merchant.create({
         data: {
-          id: "default",
+          id: "default_merchant",
           businessName: "Apex Gear Outfitters",
           supportEmail: "support@apexgear.example.com",
-          paypalClientId: process.env.PAYPAL_CLIENT_ID || "",
-          paypalClientSecret: process.env.PAYPAL_CLIENT_SECRET || "",
-          paypalEnvironment: "sandbox",
-          openAiApiKey: process.env.OPENAI_API_KEY || "",
-          autoAnalyzeOnArrival: true,
+          requireHumanApproval: true, // DEFAULT REQUIREMENT: Human approval mandatory!
           strictEvidenceEnforced: true,
+          autoAnalyzeOnArrival: true,
+          paypalConnection: {
+            create: {
+              environment: "sandbox",
+              status: "SIMULATION",
+              clientId: process.env.PAYPAL_CLIENT_ID || "",
+              clientSecret: process.env.PAYPAL_CLIENT_SECRET || "",
+            },
+          },
         },
+        include: { paypalConnection: true },
       });
     }
+
+    const conn = merchant.paypalConnection;
 
     return NextResponse.json({
       success: true,
       settings: {
-        ...settings,
-        // Mask secret for UI security display
-        paypalClientSecret: settings.paypalClientSecret
-          ? `${settings.paypalClientSecret.slice(0, 4)}••••••••${settings.paypalClientSecret.slice(-4)}`
+        id: merchant.id,
+        businessName: merchant.businessName,
+        supportEmail: merchant.supportEmail,
+        requireHumanApproval: merchant.requireHumanApproval, // DEFAULT: true
+        strictEvidenceEnforced: merchant.strictEvidenceEnforced,
+        autoAnalyzeOnArrival: merchant.autoAnalyzeOnArrival,
+        paypalEnvironment: conn?.environment || "sandbox",
+        paypalClientId: conn?.clientId || "",
+        paypalClientSecret: conn?.clientSecret
+          ? `${conn.clientSecret.slice(0, 4)}••••••••${conn.clientSecret.slice(-4)}`
           : "",
-        openAiApiKey: settings.openAiApiKey
-          ? `${settings.openAiApiKey.slice(0, 3)}••••••••${settings.openAiApiKey.slice(-4)}`
-          : "",
-        hasLivePayPalConfig: Boolean(
-          settings.paypalClientId &&
-          settings.paypalClientSecret &&
-          settings.paypalClientId.trim() !== ""
-        ),
-        hasLiveOpenAiConfig: Boolean(
-          settings.openAiApiKey &&
-          settings.openAiApiKey.trim() !== ""
-        ),
+        hasLivePayPalConfig: Boolean(conn?.clientId && conn?.clientSecret && conn.clientId.trim() !== ""),
+        connectionStatus: conn?.status || "SIMULATION",
       },
     });
   } catch (error: any) {
@@ -58,37 +66,62 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    const updateData: any = {
+    const merchantUpdate: any = {
       businessName: body.businessName,
       supportEmail: body.supportEmail,
-      paypalEnvironment: body.paypalEnvironment || "sandbox",
-      autoAnalyzeOnArrival: Boolean(body.autoAnalyzeOnArrival),
+      requireHumanApproval: body.requireHumanApproval !== undefined ? Boolean(body.requireHumanApproval) : true,
       strictEvidenceEnforced: Boolean(body.strictEvidenceEnforced),
+      autoAnalyzeOnArrival: Boolean(body.autoAnalyzeOnArrival),
     };
 
+    const updatedMerchant = await prisma.merchant.upsert({
+      where: { id: "default_merchant" },
+      create: {
+        id: "default_merchant",
+        ...merchantUpdate,
+      },
+      update: merchantUpdate,
+    });
+
+    const connUpdate: any = {
+      environment: body.paypalEnvironment || "sandbox",
+    };
     if (body.paypalClientId !== undefined) {
-      updateData.paypalClientId = body.paypalClientId;
+      connUpdate.clientId = body.paypalClientId;
     }
     if (body.paypalClientSecret && !body.paypalClientSecret.includes("•••")) {
-      updateData.paypalClientSecret = body.paypalClientSecret;
-    }
-    if (body.openAiApiKey && !body.openAiApiKey.includes("•••")) {
-      updateData.openAiApiKey = body.openAiApiKey;
+      connUpdate.clientSecret = body.paypalClientSecret;
     }
 
-    const updated = await prisma.merchantSettings.upsert({
-      where: { id: "default" },
+    await prisma.payPalConnection.upsert({
+      where: { merchantId: updatedMerchant.id },
       create: {
-        id: "default",
-        ...updateData,
+        merchantId: updatedMerchant.id,
+        ...connUpdate,
+        status: connUpdate.clientId ? "CONNECTED" : "SIMULATION",
       },
-      update: updateData,
+      update: {
+        ...connUpdate,
+        status: connUpdate.clientId ? "CONNECTED" : "SIMULATION",
+      },
+    });
+
+    await recordAuditLog({
+      merchantId: updatedMerchant.id,
+      eventType: "DISPUTE_UPDATED",
+      severity: "INFO",
+      summary: `Merchant configuration updated. Human approval required: ${updatedMerchant.requireHumanApproval}.`,
+      details: {
+        businessName: updatedMerchant.businessName,
+        requireHumanApproval: updatedMerchant.requireHumanApproval,
+      },
+      actor: "merchant_user",
     });
 
     return NextResponse.json({
       success: true,
-      message: "Merchant settings saved successfully.",
-      settings: updated,
+      message: "Merchant and PayPal connection settings saved.",
+      settings: updatedMerchant,
     });
   } catch (error: any) {
     console.error("POST /api/settings error:", error);

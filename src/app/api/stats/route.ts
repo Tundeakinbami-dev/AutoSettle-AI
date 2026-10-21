@@ -5,7 +5,8 @@ export async function GET() {
   try {
     const disputes = await prisma.dispute.findMany({
       include: {
-        analysis: true,
+        aiAnalysis: true,
+        submissionAttempts: { take: 1, orderBy: { attemptedAt: "desc" } },
       },
     });
 
@@ -30,18 +31,18 @@ export async function GET() {
       ? Math.round((wonCount / resolvedDisputes.length) * 100)
       : 88;
 
-    const reasonBreakdown = disputes.reduce((acc: Record<string, number>, d) => {
-      acc[d.reason] = (acc[d.reason] || 0) + 1;
-      return acc;
-    }, {});
+    // Distinct Response Workflow Status counts requested by user!
+    const workflowCounts = {
+      DRAFT: disputes.filter((d) => d.responseWorkflowStatus === "DRAFT").length,
+      NEEDS_REVIEW: disputes.filter((d) => d.responseWorkflowStatus === "NEEDS_REVIEW").length,
+      APPROVED: disputes.filter((d) => d.responseWorkflowStatus === "APPROVED").length,
+      SUBMITTING: disputes.filter((d) => d.responseWorkflowStatus === "SUBMITTING").length,
+      SUBMITTED: disputes.filter((d) => d.responseWorkflowStatus === "SUBMITTED").length,
+      SUBMISSION_FAILED: disputes.filter((d) => d.responseWorkflowStatus === "SUBMISSION_FAILED").length,
+      AWAITING_CONFIRMATION: disputes.filter((d) => d.responseWorkflowStatus === "AWAITING_CONFIRMATION").length,
+    };
 
-    const aiAnalyzedCount = disputes.filter((d) => d.aiAnalyzed).length;
-    const avgCompleteness = disputes.filter((d) => d.aiConfidenceScore).length > 0
-      ? Math.round(
-          disputes.filter((d) => d.aiConfidenceScore).reduce((sum, d) => sum + (d.aiConfidenceScore || 0), 0) /
-          disputes.filter((d) => d.aiConfidenceScore).length
-        )
-      : 84;
+    const aiAnalyzedCount = disputes.filter((d) => d.aiAnalysis !== null).length;
 
     return NextResponse.json({
       success: true,
@@ -52,9 +53,8 @@ export async function GET() {
         totalVolume,
         winRate,
         aiAnalyzedCount,
-        avgCompleteness,
-        reasonBreakdown,
-        avgResponseMinutes: "4.2 min", // compared to industry standard 4.8 hours
+        workflowCounts,
+        avgResponseMinutes: "4.2 min",
       },
     });
   } catch (error: any) {

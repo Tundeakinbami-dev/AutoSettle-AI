@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get("status");
+    const workflowStatus = searchParams.get("workflowStatus");
     const reason = searchParams.get("reason");
     const search = searchParams.get("search");
 
@@ -12,6 +14,10 @@ export async function GET(req: NextRequest) {
 
     if (status && status !== "ALL") {
       where.status = status;
+    }
+
+    if (workflowStatus && workflowStatus !== "ALL") {
+      where.responseWorkflowStatus = workflowStatus;
     }
 
     if (reason && reason !== "ALL") {
@@ -24,26 +30,32 @@ export async function GET(req: NextRequest) {
         { paypalDisputeId: { contains: q } },
         { buyerName: { contains: q } },
         { buyerEmail: { contains: q } },
-        { sellerTransactionId: { contains: q } },
       ];
     }
 
     const disputes = await prisma.dispute.findMany({
       where,
       include: {
+        transaction: true,
         order: true,
         trackingInfo: true,
-        analysis: true,
+        aiAnalysis: true,
+        draftResponses: {
+          orderBy: { version: "desc" },
+          take: 1,
+        },
+        submissionAttempts: {
+          orderBy: { attemptedAt: "desc" },
+          take: 1,
+        },
         evidenceItems: {
           select: { id: true, evidenceType: true, strength: true, title: true, verified: true },
         },
         _count: {
-          select: { messages: true, evidenceItems: true, auditLogs: true },
+          select: { messages: true, evidenceItems: true, auditLogs: true, submissionAttempts: true },
         },
       },
-      orderBy: [
-        { responseDueDate: "asc" },
-      ],
+      orderBy: [{ responseDueDate: "asc" }],
     });
 
     return NextResponse.json({
@@ -75,6 +87,7 @@ export async function POST(req: NextRequest) {
 
     const dispute = await prisma.dispute.create({
       data: {
+        merchantId: "default_merchant",
         paypalDisputeId,
         status: "REQUIRED_ACTION",
         disputeLifeCycleStage: "CHARGEBACK",
@@ -83,9 +96,19 @@ export async function POST(req: NextRequest) {
         currency: body.currency || "USD",
         buyerName,
         buyerEmail,
-        sellerTransactionId: body.sellerTransactionId || `TXN-${Math.floor(100000000 + Math.random() * 900000000)}`,
         responseDueDate,
-        merchantNotes: body.merchantNotes || "Simulated dispute intake for demonstration testing.",
+        merchantNotes: body.merchantNotes || "Dispute intake recorded.",
+        responseWorkflowStatus: "NEEDS_REVIEW", // Distinct state
+        transaction: {
+          create: {
+            sellerTransactionId: body.sellerTransactionId || `TXN-${Math.floor(100000000 + Math.random() * 900000000)}`,
+            grossAmount: amount,
+            currency: body.currency || "USD",
+            paymentStatus: "COMPLETED",
+            paymentSource: "PAYPAL",
+            payerEmail: buyerEmail,
+          },
+        },
         order: {
           create: {
             orderNumber: body.orderNumber || `AG-${Math.floor(90000 + Math.random() * 9999)}`,
@@ -113,9 +136,20 @@ export async function POST(req: NextRequest) {
         },
       },
       include: {
+        transaction: true,
         order: true,
         trackingInfo: true,
       },
+    });
+
+    // Record audit log
+    await recordAuditLog({
+      disputeId: dispute.id,
+      eventType: "DISPUTE_CREATED",
+      severity: "INFO",
+      summary: `Dispute ${dispute.paypalDisputeId} created for $${amount.toFixed(2)} (${reason})`,
+      details: { amount, reason, buyerEmail, status: "REQUIRED_ACTION", workflowStatus: "NEEDS_REVIEW" },
+      actor: "merchant_user",
     });
 
     return NextResponse.json({ success: true, dispute });

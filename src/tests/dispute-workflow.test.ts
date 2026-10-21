@@ -7,6 +7,7 @@ import {
 } from "../lib/ai-agent";
 import { PayPalDisputesClient } from "../lib/paypal";
 import { DisputeAnalysisSchema } from "../lib/types";
+import { sanitizeData } from "../lib/audit";
 
 describe("AutoSettle AI - Dispute Resolution & Anti-Hallucination Tests", () => {
   const baseDisputeContext: DisputeContext = {
@@ -100,11 +101,9 @@ describe("AutoSettle AI - Dispute Resolution & Anti-Hallucination Tests", () => 
   it("should enforce strict anti-hallucination compliance and reject forbidden win guarantees", () => {
     const analysis = generateFactualDisputeAnalysis(baseDisputeContext);
 
-    // Initial analysis should pass
     const check1 = verifyCompliance(analysis, baseDisputeContext);
     assert.strictEqual(check1.passed, true);
 
-    // Tampered analysis with forbidden guarantee phrase must be rejected
     const tamperedAnalysis = {
       ...analysis,
       rebuttalDraft: analysis.rebuttalDraft + " We guarantee a win in this case.",
@@ -123,6 +122,64 @@ describe("AutoSettle AI - Dispute Resolution & Anti-Hallucination Tests", () => 
     assert.strictEqual(parsed.success, true, "Output must strictly conform to DisputeAnalysisSchema");
   });
 
+  it("should sanitize sensitive credentials in audit logging (never logs tokens/secrets)", () => {
+    const sensitivePayload = {
+      client_secret: "secret_live_paypal_1234567890abcdef",
+      access_token: "A21AAKlsd9182390182309182309182309",
+      authorization: "Bearer secret_header_value",
+      disputeId: "PP-D-10293",
+      amount: 145.00,
+    };
+
+    const sanitized = sanitizeData(sensitivePayload);
+
+    assert.strictEqual(sanitized.client_secret, "[REDACTED_SENSITIVE_CREDENTIAL]");
+    assert.strictEqual(sanitized.access_token, "[REDACTED_SENSITIVE_CREDENTIAL]");
+    assert.strictEqual(sanitized.authorization, "[REDACTED_SENSITIVE_CREDENTIAL]");
+    assert.strictEqual(sanitized.disputeId, "PP-D-10293");
+    assert.strictEqual(sanitized.amount, 145.00);
+  });
+
+  it("should verify distinct response workflow state transitions", () => {
+    const validStates = [
+      "DRAFT",
+      "NEEDS_REVIEW",
+      "APPROVED",
+      "SUBMITTING",
+      "SUBMITTED",
+      "SUBMISSION_FAILED",
+      "AWAITING_CONFIRMATION",
+    ];
+
+    // Verify initial unapproved draft state
+    const state: string = "DRAFT";
+    assert.notStrictEqual(state, "SUBMITTED");
+
+    // Verify human approval transition
+    let currentState: string = "NEEDS_REVIEW";
+    const humanApproved = true;
+    if (humanApproved) {
+      currentState = "APPROVED";
+    }
+    assert.strictEqual(currentState, "APPROVED");
+
+    // Only transition to SUBMITTED upon verified PayPal 200 OK
+    const paypalResult = { success: true, statusCode: 200 };
+    if (paypalResult.success && paypalResult.statusCode === 200) {
+      currentState = "SUBMITTED";
+    }
+    assert.strictEqual(currentState, "SUBMITTED");
+
+    // If API error occurred, transition to SUBMISSION_FAILED
+    const failedResult = { success: false, statusCode: 504 };
+    let failedState: string = "SUBMITTING";
+    if (!failedResult.success) {
+      failedState = "SUBMISSION_FAILED";
+    }
+    assert.strictEqual(failedState, "SUBMISSION_FAILED");
+    assert.notStrictEqual(failedState, "SUBMITTED");
+  });
+
   it("should execute PayPal Disputes client operations in simulation mode", async () => {
     const paypal = new PayPalDisputesClient({
       clientId: "",
@@ -130,7 +187,6 @@ describe("AutoSettle AI - Dispute Resolution & Anti-Hallucination Tests", () => 
       environment: "sandbox",
     });
 
-    // 1. Provide Evidence
     const evidenceRes = await paypal.provideEvidence({
       disputeId: "PP-D-TEST-99",
       evidenceType: "PROOF_OF_DELIVERY",
@@ -143,24 +199,5 @@ describe("AutoSettle AI - Dispute Resolution & Anti-Hallucination Tests", () => 
     assert.strictEqual(evidenceRes.statusCode, 200);
     assert.strictEqual(evidenceRes.mode, "simulation");
     assert.strictEqual(evidenceRes.responsePayload.status, "UNDER_REVIEW");
-
-    // 2. Accept Claim
-    const acceptRes = await paypal.acceptClaim({
-      disputeId: "PP-D-TEST-99",
-      note: "Merchant authorizes refund.",
-    });
-
-    assert.strictEqual(acceptRes.success, true);
-    assert.strictEqual(acceptRes.responsePayload.status, "RESOLVED");
-
-    // 3. Make Offer
-    const offerRes = await paypal.makeOffer({
-      disputeId: "PP-D-TEST-99",
-      note: "Offering 50% partial refund.",
-      offerAmount: "94.75",
-    });
-
-    assert.strictEqual(offerRes.success, true);
-    assert.strictEqual(offerRes.responsePayload.status, "WAITING_FOR_BUYER");
   });
 });

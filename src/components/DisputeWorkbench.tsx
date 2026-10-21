@@ -13,16 +13,19 @@ import {
   UploadCloud,
   Check,
   ChevronRight,
-  Eye,
   FileCheck,
-  ExternalLink,
   RefreshCw,
   PackageCheck,
-  HelpCircle,
   Truck,
   MessageSquare,
   History,
   Lock,
+  UserCheck,
+  XCircle,
+  AlertCircle,
+  RotateCcw,
+  Loader2,
+  FileEdit,
 } from "lucide-react";
 
 interface EvidenceItem {
@@ -34,6 +37,7 @@ interface EvidenceItem {
   fileUrl?: string;
   strength: string;
   verified: boolean;
+  provenanceSource?: string;
 }
 
 interface CustomerMessage {
@@ -44,17 +48,43 @@ interface CustomerMessage {
   messageText: string;
 }
 
-interface AuditLog {
+interface DraftResponse {
+  id: string;
+  version: number;
+  status: string;
+  targetAction: string;
+  rebuttalNarrative: string;
+  characterCount: number;
+  isApproved: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
+}
+
+interface SubmissionAttempt {
   id: string;
   action: string;
   status: string;
-  payloadSent?: string;
-  paypalResponse?: string;
-  submittedBy: string;
-  submittedAt: string;
+  endpoint: string;
+  httpStatusCode?: number;
+  requestPayloadSanitized: string;
+  responsePayloadSanitized?: string;
+  errorMessage?: string;
+  attemptedAt: string;
+  completedAt?: string;
 }
 
-interface DisputeDetail {
+interface AuditLogEntry {
+  id: string;
+  eventType: string;
+  severity: string;
+  summary: string;
+  detailsJson?: string;
+  actor: string;
+  actorId?: string;
+  timestamp: string;
+}
+
+export interface DisputeDetail {
   id: string;
   paypalDisputeId: string;
   status: string;
@@ -64,13 +94,15 @@ interface DisputeDetail {
   currency: string;
   buyerName: string;
   buyerEmail: string;
-  sellerTransactionId: string;
   responseDueDate: string;
   merchantNotes?: string;
-  aiAnalyzed: boolean;
-  aiConfidenceScore?: number;
-  aiRecommendedAction?: string;
   resolutionOutcome?: string;
+  responseWorkflowStatus: "DRAFT" | "NEEDS_REVIEW" | "APPROVED" | "SUBMITTING" | "SUBMITTED" | "SUBMISSION_FAILED" | "AWAITING_CONFIRMATION";
+  transaction?: {
+    sellerTransactionId: string;
+    grossAmount: number;
+    paymentStatus: string;
+  };
   order?: {
     orderNumber: string;
     orderDate: string;
@@ -80,33 +112,29 @@ interface DisputeDetail {
     billingAddress: string;
     orderTotal: number;
     itemsJson: string;
-    paymentMethod: string;
   };
   trackingInfo?: {
     carrier: string;
     trackingNumber: string;
     status: string;
-    shippedDate?: string;
     deliveredDate?: string;
-    destinationZip?: string;
     signedBy?: string;
-    deliveryProofUrl?: string;
-    checkpointHistory?: string;
   };
   evidenceItems: EvidenceItem[];
   messages: CustomerMessage[];
-  analysis?: {
+  aiAnalysis?: {
     summary: string;
     completenessScore: number;
     recommendedAction: string;
     recommendationRationale: string;
     keyStrengthsJson: string;
     criticalGapsJson: string;
-    rebuttalDraft: string;
     citationsJson: string;
     riskLevel: string;
   };
-  auditLogs: AuditLog[];
+  draftResponses: DraftResponse[];
+  submissionAttempts: SubmissionAttempt[];
+  auditLogs: AuditLogEntry[];
 }
 
 interface DisputeWorkbenchProps {
@@ -122,16 +150,25 @@ export default function DisputeWorkbench({
 }: DisputeWorkbenchProps) {
   const [activeTab, setActiveTab] = useState<"ANALYSIS" | "REBUTTAL" | "EVIDENCE" | "SUBMIT" | "AUDIT">("ANALYSIS");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [rebuttalText, setRebuttalText] = useState(dispute.analysis?.rebuttalDraft || "");
-  const [selectedAction, setSelectedAction] = useState<"PROVIDE_EVIDENCE" | "ACCEPT_CLAIM" | "MAKE_OFFER">(
-    (dispute.analysis?.recommendedAction as any) || "PROVIDE_EVIDENCE"
+  const [isApproving, setIsApproving] = useState(false);
+  const [rebuttalText, setRebuttalText] = useState(
+    dispute.draftResponses[0]?.rebuttalNarrative || ""
   );
-  const [authorizedByMerchant, setAuthorizedByMerchant] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [selectedAction, setSelectedAction] = useState<"PROVIDE_EVIDENCE" | "ACCEPT_CLAIM" | "MAKE_OFFER">(
+    (dispute.draftResponses[0]?.targetAction as any) ||
+    (dispute.aiAnalysis?.recommendedAction as any) ||
+    "PROVIDE_EVIDENCE"
+  );
+  const [authorizedByMerchant, setAuthorizedByMerchant] = useState(
+    dispute.responseWorkflowStatus === "APPROVED" || dispute.responseWorkflowStatus === "SUBMITTED"
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any | null>(null);
   const [offerAmount, setOfferAmount] = useState<string>((dispute.disputeAmount * 0.5).toFixed(2));
+  const [simulateFailureToggle, setSimulateFailureToggle] = useState(false);
 
-  // Evidence upload state
+  // Evidence upload modal state
   const [showAddEvidence, setShowAddEvidence] = useState(false);
   const [newEvidenceType, setNewEvidenceType] = useState("PROOF_OF_FULFILLMENT");
   const [newEvidenceTitle, setNewEvidenceTitle] = useState("");
@@ -139,20 +176,19 @@ export default function DisputeWorkbench({
   const [isAddingEvidence, setIsAddingEvidence] = useState(false);
 
   // Parse JSON helpers
-  const keyStrengths: string[] = dispute.analysis?.keyStrengthsJson
-    ? JSON.parse(dispute.analysis.keyStrengthsJson)
+  const keyStrengths: string[] = dispute.aiAnalysis?.keyStrengthsJson
+    ? JSON.parse(dispute.aiAnalysis.keyStrengthsJson)
     : [];
-  const criticalGaps: string[] = dispute.analysis?.criticalGapsJson
-    ? JSON.parse(dispute.analysis.criticalGapsJson)
+  const criticalGaps: string[] = dispute.aiAnalysis?.criticalGapsJson
+    ? JSON.parse(dispute.aiAnalysis.criticalGapsJson)
     : [];
-  const citations: Array<{ fact: string; source: string; verified: boolean }> = dispute.analysis?.citationsJson
-    ? JSON.parse(dispute.analysis.citationsJson)
+  const citations: Array<{ fact: string; source: string; verified: boolean }> = dispute.aiAnalysis?.citationsJson
+    ? JSON.parse(dispute.aiAnalysis.citationsJson)
     : [];
   const orderItems = dispute.order?.itemsJson
     ? JSON.parse(dispute.order.itemsJson)
     : [];
 
-  // Urgency computation
   const dueDate = new Date(dispute.responseDueDate);
   const diffHours = Math.round((dueDate.getTime() - Date.now()) / (1000 * 3600));
 
@@ -173,6 +209,44 @@ export default function DisputeWorkbench({
       console.error("AI Analysis error:", err);
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  // Save edited rebuttal text
+  const handleSaveDraft = async () => {
+    setIsSavingDraft(true);
+    try {
+      await fetch(`/api/disputes/${dispute.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rebuttalNarrative: rebuttalText }),
+      });
+      onRefresh();
+    } catch (err) {
+      console.error("Save draft error:", err);
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  // Grant Human Approval
+  const handleGrantApproval = async () => {
+    setIsApproving(true);
+    try {
+      const res = await fetch(`/api/disputes/${dispute.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approver: "merchant_compliance_reviewer" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAuthorizedByMerchant(true);
+        onRefresh();
+      }
+    } catch (err) {
+      console.error("Approval error:", err);
+    } finally {
+      setIsApproving(false);
     }
   };
 
@@ -207,8 +281,9 @@ export default function DisputeWorkbench({
 
   // Submit to PayPal Disputes API
   const handleSubmitToPayPal = async () => {
-    if (!authorizedByMerchant) return;
+    if (!authorizedByMerchant && dispute.responseWorkflowStatus !== "APPROVED") return;
     setIsSubmitting(true);
+    setSubmissionResult(null);
     try {
       const res = await fetch(`/api/disputes/${dispute.id}/submit-paypal`, {
         method: "POST",
@@ -219,6 +294,7 @@ export default function DisputeWorkbench({
           authorizedByMerchant: true,
           offerAmount: selectedAction === "MAKE_OFFER" ? offerAmount : undefined,
           evidenceType: dispute.trackingInfo ? "PROOF_OF_DELIVERY" : "PROOF_OF_FULFILLMENT",
+          simulateError: simulateFailureToggle,
         }),
       });
       const data = await res.json();
@@ -231,11 +307,59 @@ export default function DisputeWorkbench({
     }
   };
 
+  // Render Workflow Status Pill
+  const renderWorkflowPill = () => {
+    switch (dispute.responseWorkflowStatus) {
+      case "DRAFT":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            <FileEdit className="w-3.5 h-3.5 text-slate-400" /> State: Draft (Unapproved)
+          </span>
+        );
+      case "NEEDS_REVIEW":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/40">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400" /> State: Needs Review (Human Sign-off Pending)
+          </span>
+        );
+      case "APPROVED":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+            <UserCheck className="w-3.5 h-3.5 text-indigo-400" /> State: Approved (Authorized for PayPal Dispatch)
+          </span>
+        );
+      case "SUBMITTING":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/40 animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" /> State: Submitting to PayPal...
+          </span>
+        );
+      case "SUBMITTED":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> State: Submitted to PayPal Disputes API
+          </span>
+        );
+      case "SUBMISSION_FAILED":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+            <XCircle className="w-3.5 h-3.5 text-rose-400" /> State: Submission Failed (Retry Available)
+          </span>
+        );
+      case "AWAITING_CONFIRMATION":
+        return (
+          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+            <Clock className="w-3.5 h-3.5 text-purple-400" /> State: Awaiting Confirmation
+          </span>
+        );
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
       <div className="bg-[#0b101c] border border-slate-800 rounded-2xl w-full max-w-6xl max-h-[94vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Top Header */}
-        <div className="px-6 py-4 border-b border-slate-800 bg-[#0f172a]/70 flex items-start justify-between gap-4">
+        <div className="px-6 py-4 border-b border-slate-800 bg-[#0f172a]/80 flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="font-mono text-lg font-bold text-sky-400">
@@ -244,17 +368,9 @@ export default function DisputeWorkbench({
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-mono">
                 {dispute.disputeLifeCycleStage}
               </span>
-              <span
-                className={`text-xs px-2.5 py-0.5 rounded-full font-medium border ${
-                  dispute.status === "RESOLVED"
-                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"
-                    : dispute.status === "REQUIRED_ACTION"
-                    ? "bg-rose-500/10 text-rose-300 border-rose-500/30"
-                    : "bg-sky-500/10 text-sky-300 border-sky-500/30"
-                }`}
-              >
-                {dispute.status}
-              </span>
+
+              {/* DISTINCT RESPONSE WORKFLOW STATE PILL */}
+              {renderWorkflowPill()}
 
               {/* Deadline Badge */}
               {dispute.status !== "RESOLVED" && (
@@ -277,7 +393,7 @@ export default function DisputeWorkbench({
               )}
             </div>
 
-            <div className="flex items-center gap-3 text-xs text-slate-400 mt-1 flex-wrap">
+            <div className="flex items-center gap-3 text-xs text-slate-400 mt-1.5 flex-wrap">
               <span>
                 Buyer: <strong className="text-slate-200">{dispute.buyerName}</strong> ({dispute.buyerEmail})
               </span>
@@ -285,10 +401,14 @@ export default function DisputeWorkbench({
               <span>
                 Amount: <strong className="text-slate-100 font-mono">${dispute.disputeAmount.toFixed(2)} {dispute.currency}</strong>
               </span>
-              <span>•</span>
-              <span>
-                Txn: <span className="font-mono text-slate-300">{dispute.sellerTransactionId}</span>
-              </span>
+              {dispute.transaction && (
+                <>
+                  <span>•</span>
+                  <span>
+                    Txn: <span className="font-mono text-slate-300">{dispute.transaction.sellerTransactionId}</span>
+                  </span>
+                </>
+              )}
               {dispute.order && (
                 <>
                   <span>•</span>
@@ -312,7 +432,7 @@ export default function DisputeWorkbench({
         <div className="px-6 border-b border-slate-800 bg-[#090e17] flex items-center gap-2 overflow-x-auto">
           {[
             { id: "ANALYSIS", label: "AI Evidence Analysis", icon: Sparkles },
-            { id: "REBUTTAL", label: "Factual Rebuttal", icon: FileText },
+            { id: "REBUTTAL", label: "Factual Rebuttal & Review", icon: FileText },
             { id: "EVIDENCE", label: `Evidence Locker (${dispute.evidenceItems.length})`, icon: PackageCheck },
             { id: "SUBMIT", label: "PayPal API Submission", icon: Send },
             { id: "AUDIT", label: `Audit Trail (${dispute.auditLogs.length})`, icon: History },
@@ -340,9 +460,8 @@ export default function DisputeWorkbench({
           {/* TAB 1: AI ANALYSIS & EVIDENCE GAPS */}
           {activeTab === "ANALYSIS" && (
             <div className="space-y-6">
-              {/* Score & Recommendation Banner */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Completeness Meter */}
+                {/* Completeness Gauge */}
                 <div className="rounded-xl bg-slate-900/70 border border-slate-800 p-4 flex flex-col justify-between">
                   <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
                     Evidence Completeness
@@ -350,35 +469,35 @@ export default function DisputeWorkbench({
                   <div className="flex items-center gap-4 my-2">
                     <div className="relative w-16 h-16 rounded-full flex items-center justify-center border-4 border-slate-800 bg-slate-950">
                       <span className="text-lg font-bold font-mono text-white">
-                        {dispute.analysis?.completenessScore || 0}%
+                        {dispute.aiAnalysis?.completenessScore || 0}%
                       </span>
                     </div>
                     <div>
                       <div className="text-sm font-semibold text-slate-200">
-                        {(dispute.analysis?.completenessScore || 0) >= 80
+                        {(dispute.aiAnalysis?.completenessScore || 0) >= 80
                           ? "Robust Defense"
-                          : (dispute.analysis?.completenessScore || 0) >= 50
+                          : (dispute.aiAnalysis?.completenessScore || 0) >= 50
                           ? "Moderate Documentation"
-                          : "High Evidence Risk"}
+                          : "High Risk of Forfeiture"}
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {dispute.evidenceItems.length} verified documents attached
+                        {dispute.evidenceItems.length} verified records attached
                       </p>
                     </div>
                   </div>
                   <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                     <div
                       className="h-full bg-gradient-to-r from-sky-400 to-emerald-400 rounded-full"
-                      style={{ width: `${dispute.analysis?.completenessScore || 0}%` }}
+                      style={{ width: `${dispute.aiAnalysis?.completenessScore || 0}%` }}
                     />
                   </div>
                 </div>
 
-                {/* AI Recommended Action */}
+                {/* AI Recommendation */}
                 <div className="rounded-xl bg-slate-900/70 border border-slate-800 p-4 flex flex-col justify-between md:col-span-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-                      AI Action Recommendation
+                      AI Action Strategy
                     </span>
                     <button
                       onClick={handleRunAnalysis}
@@ -393,62 +512,45 @@ export default function DisputeWorkbench({
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-sky-500/20 border border-sky-500/40 text-sky-200 font-semibold text-sm">
                       <ShieldCheck className="w-4 h-4 text-sky-400" />
                       <span>
-                        {dispute.analysis?.recommendedAction === "PROVIDE_EVIDENCE"
-                          ? "Defend Claim: Submit Provenance Evidence"
-                          : dispute.analysis?.recommendedAction === "ACCEPT_CLAIM"
+                        {dispute.aiAnalysis?.recommendedAction === "PROVIDE_EVIDENCE"
+                          ? "Defend Claim: Submit Factual Evidence"
+                          : dispute.aiAnalysis?.recommendedAction === "ACCEPT_CLAIM"
                           ? "Accept Claim: Immediate Buyer Refund"
-                          : "Offer Settlement / Partial Refund"}
+                          : "Offer Partial Refund Settlement"}
                       </span>
                     </div>
                     <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                      {dispute.analysis?.recommendationRationale ||
-                        "Analysis pending. Click Re-Analyze to trigger AI evidence compilation."}
+                      {dispute.aiAnalysis?.recommendationRationale || "Analysis pending."}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 text-[11px] text-slate-400">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>PayPal Seller Protection Criteria Evaluated</span>
+                    <span>Evaluated against PayPal Seller Protection Criteria</span>
                   </div>
                 </div>
               </div>
 
-              {/* Strengths and Gaps Breakdown */}
+              {/* Strengths and Gaps */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Strengths */}
                 <div className="rounded-xl bg-slate-900/50 border border-emerald-500/20 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center">
-                      <Check className="w-3.5 h-3.5 text-emerald-400" />
-                    </div>
-                    <h4 className="text-xs font-semibold text-emerald-300 uppercase tracking-wider">
-                      Verified Evidence Strengths ({keyStrengths.length})
-                    </h4>
-                  </div>
-                  <ul className="space-y-2.5">
-                    {keyStrengths.length > 0 ? (
-                      keyStrengths.map((s, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-xs text-slate-200">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-                          <span>{s}</span>
-                        </li>
-                      ))
-                    ) : (
-                      <p className="text-xs text-slate-400 italic">No strong evidence records identified.</p>
-                    )}
+                  <h4 className="text-xs font-semibold text-emerald-300 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-400" /> Verified Strengths ({keyStrengths.length})
+                  </h4>
+                  <ul className="space-y-2">
+                    {keyStrengths.map((s, idx) => (
+                      <li key={idx} className="flex items-start gap-2 text-xs text-slate-200">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                        <span>{s}</span>
+                      </li>
+                    ))}
                   </ul>
                 </div>
 
-                {/* Critical Gaps */}
                 <div className="rounded-xl bg-slate-900/50 border border-amber-500/20 p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-6 h-6 rounded-md bg-amber-500/10 border border-amber-500/30 flex items-center justify-center">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                    </div>
-                    <h4 className="text-xs font-semibold text-amber-300 uppercase tracking-wider">
-                      Evidence Gaps & Missing Information ({criticalGaps.length})
-                    </h4>
-                  </div>
-                  <ul className="space-y-2.5">
+                  <h4 className="text-xs font-semibold text-amber-300 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Evidence Gaps Detected ({criticalGaps.length})
+                  </h4>
+                  <ul className="space-y-2">
                     {criticalGaps.length > 0 ? (
                       criticalGaps.map((g, idx) => (
                         <li key={idx} className="flex items-start gap-2 text-xs text-amber-200/90">
@@ -458,15 +560,15 @@ export default function DisputeWorkbench({
                       ))
                     ) : (
                       <p className="text-xs text-emerald-400 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Zero critical evidence gaps identified!
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Zero evidence gaps identified!
                       </p>
                     )}
                   </ul>
                 </div>
               </div>
 
-              {/* Anti-Hallucination Guardrail Banner */}
-              <div className="rounded-xl bg-slate-950/70 border border-slate-800 p-4 flex items-center justify-between flex-wrap gap-3">
+              {/* Anti-Hallucination Guardrail Notice */}
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 flex items-center justify-between flex-wrap gap-3">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/30 flex items-center justify-center shrink-0">
                     <Lock className="w-4 h-4 text-sky-400" />
@@ -479,7 +581,7 @@ export default function DisputeWorkbench({
                       </span>
                     </h5>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Every cited fact (carrier tracking, recipient signature, line items) is matched against database records. AutoSettle AI never promises guaranteed dispute wins.
+                      Every cited fact is matched against database records. AutoSettle AI strictly forbids win guarantees.
                     </p>
                   </div>
                 </div>
@@ -487,46 +589,94 @@ export default function DisputeWorkbench({
                   onClick={() => setActiveTab("REBUTTAL")}
                   className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 transition-colors"
                 >
-                  <span>Review Draft Rebuttal</span>
+                  <span>Review Draft Statement</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
           )}
 
-          {/* TAB 2: FACTUAL REBUTTAL GENERATOR */}
+          {/* TAB 2: FACTUAL REBUTTAL & HUMAN APPROVAL */}
           {activeTab === "REBUTTAL" && (
             <div className="space-y-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-sm font-semibold text-slate-100">
-                    Factual Merchant Response Statement
+                  <h4 className="text-sm font-semibold text-slate-100 flex items-center gap-2">
+                    <span>Factual Response Statement</span>
+                    <span className="text-xs font-normal text-slate-400 font-mono">
+                      (Draft Version {dispute.draftResponses[0]?.version || 1})
+                    </span>
                   </h4>
                   <p className="text-xs text-slate-400">
-                    Formatted for PayPal Disputes Review Team. Neutral tone, chronological citations.
+                    Review and edit before merchant approval.
                   </p>
                 </div>
-                <div className="text-xs text-slate-400">
-                  <span className="font-mono text-slate-200">{rebuttalText.length}</span> / 2000 chars (PayPal limit)
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400 font-mono">
+                    {rebuttalText.length} / 2000 chars
+                  </span>
+                  <button
+                    onClick={handleSaveDraft}
+                    disabled={isSavingDraft}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                  >
+                    <FileEdit className="w-3.5 h-3.5" />
+                    <span>{isSavingDraft ? "Saving..." : "Save Draft"}</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Editable Rebuttal Box */}
+              {/* Editable Textarea */}
               <textarea
                 value={rebuttalText}
                 onChange={(e) => setRebuttalText(e.target.value)}
-                rows={12}
-                className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-sky-500 transition-colors leading-relaxed selection:bg-sky-500/30"
-                placeholder="Drafting factual dispute rebuttal..."
+                rows={11}
+                className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-sky-500 transition-colors leading-relaxed"
+                placeholder="Drafting response statement..."
               />
 
-              {/* Provenance Citations Table */}
+              {/* Human Approval Action Banner */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-950/30 via-slate-900 to-slate-950 border border-indigo-500/30 flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                    <UserCheck className="w-5 h-5 text-indigo-400" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-slate-200">
+                      Human Approval Gate (Mandatory by Default)
+                    </h5>
+                    <p className="text-[11px] text-slate-400">
+                      {dispute.responseWorkflowStatus === "APPROVED"
+                        ? `Approved by ${dispute.draftResponses[0]?.approvedBy || "merchant"}. Submission unlocked.`
+                        : "A draft must never be submitted automatically. Click Approve Response to certify factual accuracy."}
+                    </p>
+                  </div>
+                </div>
+
+                {dispute.responseWorkflowStatus !== "APPROVED" && dispute.responseWorkflowStatus !== "SUBMITTED" ? (
+                  <button
+                    onClick={handleGrantApproval}
+                    disabled={isApproving}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+                  >
+                    <Check className={`w-3.5 h-3.5 ${isApproving ? "animate-spin" : ""}`} />
+                    <span>{isApproving ? "Approving..." : "Approve Response Draft"}</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-3 py-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Approved & Ready</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Citations */}
               <div className="rounded-xl bg-slate-900/50 border border-slate-800 p-4">
-                <h5 className="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-1.5">
+                <h5 className="text-xs font-semibold text-slate-300 mb-2.5 flex items-center gap-1.5">
                   <FileCheck className="w-3.5 h-3.5 text-sky-400" />
-                  <span>Verifiable Evidence Provenance ({citations.length} Cited Facts)</span>
+                  <span>Verifiable Evidence Citations ({citations.length})</span>
                 </h5>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {citations.map((c, i) => (
                     <div
                       key={i}
@@ -534,7 +684,7 @@ export default function DisputeWorkbench({
                     >
                       <div className="flex items-center gap-2">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <span className="text-slate-200 font-medium">{c.fact}</span>
+                        <span className="text-slate-200">{c.fact}</span>
                       </div>
                       <span className="text-[11px] font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
                         {c.source}
@@ -544,11 +694,10 @@ export default function DisputeWorkbench({
                 </div>
               </div>
 
-              {/* Action Bar */}
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex justify-end pt-2">
                 <button
                   onClick={() => setActiveTab("SUBMIT")}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium transition-all shadow-md"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-medium"
                 >
                   <span>Proceed to PayPal API Submission</span>
                   <ChevronRight className="w-4 h-4" />
@@ -557,12 +706,10 @@ export default function DisputeWorkbench({
             </div>
           )}
 
-          {/* TAB 3: EVIDENCE LOCKER & MATCHING */}
+          {/* TAB 3: EVIDENCE LOCKER */}
           {activeTab === "EVIDENCE" && (
             <div className="space-y-6">
-              {/* Order & Carrier Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Order Match Card */}
                 {dispute.order && (
                   <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-4">
                     <h5 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -597,7 +744,6 @@ export default function DisputeWorkbench({
                   </div>
                 )}
 
-                {/* Carrier Tracking Card */}
                 {dispute.trackingInfo && (
                   <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-4">
                     <h5 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -630,7 +776,7 @@ export default function DisputeWorkbench({
                 )}
               </div>
 
-              {/* Evidence Document Locker */}
+              {/* Evidence Documents */}
               <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-4">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -650,7 +796,6 @@ export default function DisputeWorkbench({
                   </button>
                 </div>
 
-                {/* Add Evidence Inline Form */}
                 {showAddEvidence && (
                   <form onSubmit={handleAddEvidence} className="mb-4 p-4 rounded-xl bg-slate-950 border border-sky-500/30 space-y-3">
                     <h6 className="text-xs font-semibold text-sky-300">Attach New Evidence to Locker</h6>
@@ -711,12 +856,11 @@ export default function DisputeWorkbench({
                   </form>
                 )}
 
-                {/* Evidence Item List */}
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {dispute.evidenceItems.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-3 rounded-lg bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition-colors"
+                      className="flex items-center justify-between p-3 rounded-lg bg-slate-950/60 border border-slate-800 text-xs"
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0">
@@ -724,7 +868,7 @@ export default function DisputeWorkbench({
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-slate-200">{item.title}</span>
+                            <span className="font-semibold text-slate-200">{item.title}</span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">
                               {item.strength}
                             </span>
@@ -732,58 +876,44 @@ export default function DisputeWorkbench({
                           <p className="text-[11px] text-slate-400 mt-0.5">{item.description}</p>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        {item.fileName && (
-                          <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-2 py-1 rounded border border-slate-800">
-                            {item.fileName}
-                          </span>
-                        )}
-                        <span className="text-emerald-400 text-xs flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Verified
-                        </span>
-                      </div>
+                      <span className="text-emerald-400 text-xs flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
-
-              {/* Customer Messaging Thread */}
-              {dispute.messages.length > 0 && (
-                <div className="rounded-xl bg-slate-900/60 border border-slate-800 p-4">
-                  <h5 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Customer Communication History ({dispute.messages.length})</span>
-                  </h5>
-                  <div className="space-y-2.5">
-                    {dispute.messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className={`p-3 rounded-xl border text-xs ${
-                          m.sender === "BUYER"
-                            ? "bg-slate-950 border-slate-800 text-slate-300"
-                            : "bg-sky-950/20 border-sky-500/20 text-sky-200"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                          <span className="font-semibold text-slate-300">
-                            {m.sender === "BUYER" ? dispute.buyerName : "Merchant Support"}
-                          </span>
-                          <span>{new Date(m.timestamp).toLocaleString()}</span>
-                        </div>
-                        <p>{m.messageText}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
           {/* TAB 4: PAYPAL API SUBMISSION */}
           {activeTab === "SUBMIT" && (
             <div className="space-y-6">
-              {/* Submission Action Selector */}
+              {/* CURRENT STATE BANNER */}
+              <div className="p-4 rounded-xl border bg-slate-900/80 border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center shrink-0">
+                    <Send className="w-5 h-5 text-sky-400" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-semibold text-white">
+                      Submission State: <span className="font-mono text-sky-300">{dispute.responseWorkflowStatus}</span>
+                    </h5>
+                    <p className="text-[11px] text-slate-400">
+                      {dispute.responseWorkflowStatus === "SUBMITTED"
+                        ? "Verified: PayPal Disputes API returned successful result. Response acknowledged."
+                        : dispute.responseWorkflowStatus === "SUBMISSION_FAILED"
+                        ? "PayPal API reported an error or timeout. You can retry with updated information."
+                        : dispute.responseWorkflowStatus === "APPROVED"
+                        ? "Approved by merchant. Ready for authorized dispatch."
+                        : "Draft mode: Requires merchant authorization before PayPal submission."}
+                    </p>
+                  </div>
+                </div>
+                {renderWorkflowPill()}
+              </div>
+
+              {/* Action Selector */}
               <div>
                 <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block mb-2">
                   Select PayPal Disputes API Action
@@ -794,19 +924,16 @@ export default function DisputeWorkbench({
                       id: "PROVIDE_EVIDENCE",
                       title: "Provide Evidence",
                       desc: "Submit factual rebuttal narrative, tracking verification, and evidence locker attachments to PayPal.",
-                      badge: "Recommended by AI",
                     },
                     {
                       id: "ACCEPT_CLAIM",
                       title: "Accept Claim (Refund)",
                       desc: "Authorize full refund to buyer and conclude dispute immediately without further fees.",
-                      badge: "Quick Resolution",
                     },
                     {
                       id: "MAKE_OFFER",
                       title: "Offer Settlement",
                       desc: "Propose a partial refund amount to the buyer via PayPal Disputes negotiation channel.",
-                      badge: "Compromise",
                     },
                   ].map((act) => (
                     <div
@@ -818,21 +945,13 @@ export default function DisputeWorkbench({
                           : "bg-slate-900/50 border-slate-800 hover:border-slate-700"
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-slate-100">{act.title}</span>
-                        {dispute.analysis?.recommendedAction === act.id && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                            {act.badge}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-400 leading-normal">{act.desc}</p>
+                      <span className="text-xs font-bold text-slate-100 block mb-1">{act.title}</span>
+                      <p className="text-[11px] text-slate-400">{act.desc}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Offer Amount Field if MAKE_OFFER is selected */}
               {selectedAction === "MAKE_OFFER" && (
                 <div className="p-4 rounded-xl bg-slate-900 border border-sky-500/30 space-y-2">
                   <label className="text-xs font-semibold text-slate-200">
@@ -845,36 +964,8 @@ export default function DisputeWorkbench({
                     onChange={(e) => setOfferAmount(e.target.value)}
                     className="w-48 bg-slate-950 border border-slate-700 rounded-lg p-2 text-sm text-slate-100 font-mono"
                   />
-                  <p className="text-[11px] text-slate-400">
-                    Disputed Total: ${dispute.disputeAmount.toFixed(2)}. Offering ${offerAmount} as resolution courtesy.
-                  </p>
                 </div>
               )}
-
-              {/* Pre-Flight Validation Checks */}
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2.5">
-                <h5 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                  Pre-Flight API Verification Checklist
-                </h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Dispute ID valid ({dispute.paypalDisputeId})</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Factual narrative within 2000 character limit</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>Strict anti-hallucination provenance verified</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                    <span>{dispute.evidenceItems.length} supporting attachments compiled</span>
-                  </div>
-                </div>
-              </div>
 
               {/* Mandatory Merchant Authorization Gate */}
               <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-500/30">
@@ -889,15 +980,29 @@ export default function DisputeWorkbench({
                     <strong className="text-white block mb-0.5">
                       Merchant Authorization & Compliance Confirmation
                     </strong>
-                    I confirm that I have reviewed the factual rebuttal and supporting evidence. The facts, carrier tracking, and attachments accurately represent this transaction without false or invented claims. I authorize submission to the PayPal Disputes API.
+                    I certify that I have reviewed the factual rebuttal and supporting evidence. The facts, carrier tracking, and attachments accurately represent this transaction without false or invented claims. I authorize submission to the PayPal Disputes API.
                   </div>
                 </label>
               </div>
 
-              {/* Submission Button */}
+              {/* Demo Failure Toggle for Testing */}
+              <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+                <div className="text-xs text-slate-400">
+                  <span className="font-semibold text-slate-300">Simulate API Failure (Demo Test):</span>
+                  <span className="block text-[11px]">Test how AutoSettle AI handles PayPal rejection without falsely marking draft as submitted.</span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={simulateFailureToggle}
+                  onChange={(e) => setSimulateFailureToggle(e.target.checked)}
+                  className="rounded text-rose-600 bg-slate-900 border-slate-700"
+                />
+              </div>
+
+              {/* Submission CTA */}
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400">
-                  Target: <span className="font-mono text-slate-300">POST /v1/customer/disputes/{dispute.paypalDisputeId}/{selectedAction.toLowerCase().replace(/_/g, "-")}</span>
+                <span className="text-xs text-slate-400 font-mono">
+                  POST /v1/customer/disputes/{dispute.paypalDisputeId}/{selectedAction.toLowerCase().replace(/_/g, "-")}
                 </span>
                 <button
                   onClick={handleSubmitToPayPal}
@@ -909,42 +1014,65 @@ export default function DisputeWorkbench({
                   }`}
                 >
                   <Send className={`w-4 h-4 ${isSubmitting ? "animate-spin" : ""}`} />
-                  <span>{isSubmitting ? "Submitting to PayPal Disputes API..." : "Submit to PayPal Disputes API"}</span>
+                  <span>
+                    {isSubmitting
+                      ? "Submitting to PayPal Disputes API..."
+                      : dispute.responseWorkflowStatus === "SUBMISSION_FAILED"
+                      ? "Retry Submission to PayPal"
+                      : "Submit to PayPal Disputes API"}
+                  </span>
                 </button>
               </div>
 
-              {/* Live PayPal Response Viewer */}
+              {/* Submission Result Viewer */}
               {submissionResult && (
-                <div className="mt-4 p-4 rounded-xl bg-slate-950 border border-emerald-500/30 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-emerald-300">
-                        PayPal API Response ({submissionResult.statusCode} OK - {submissionResult.mode})
-                      </span>
-                    </div>
+                <div
+                  className={`p-4 rounded-xl border ${
+                    submissionResult.success
+                      ? "bg-slate-950 border-emerald-500/40"
+                      : "bg-slate-950 border-rose-500/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span
+                      className={`text-xs font-bold flex items-center gap-1.5 ${
+                        submissionResult.success ? "text-emerald-300" : "text-rose-300"
+                      }`}
+                    >
+                      {submissionResult.success ? (
+                        <>
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>PayPal API Confirmed (HTTP {submissionResult.statusCode} OK)</span>
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-4 h-4 text-rose-400" />
+                          <span>Submission Failed (HTTP {submissionResult.statusCode || 400})</span>
+                        </>
+                      )}
+                    </span>
                     <span className="text-[10px] text-slate-400 font-mono">
-                      Audit Log ID: {submissionResult.auditLogId}
+                      State: {submissionResult.workflowStatus}
                     </span>
                   </div>
-                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/80 p-3 rounded-lg overflow-x-auto max-h-48">
-                    {JSON.stringify(submissionResult.paypalResponse, null, 2)}
+                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-900/90 p-3 rounded-lg overflow-x-auto max-h-48">
+                    {JSON.stringify(submissionResult.paypalResponse || { error: submissionResult.error }, null, 2)}
                   </pre>
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 5: AUDIT & COMPLIANCE TRAIL */}
+          {/* TAB 5: AUDIT TRAIL */}
           {activeTab === "AUDIT" && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-semibold text-slate-200 uppercase tracking-wider">
-                    Immutable Compliance Audit Trail
+                    Immutable Audit Trail & Compliance Log
                   </h4>
                   <p className="text-[11px] text-slate-400">
-                    Timestamped record of all AI evaluations, merchant authorizations, and PayPal Disputes API transactions.
+                    Captures all dispute events, approvals, webhook verifications, and API results.
                   </p>
                 </div>
                 <span className="text-xs font-mono text-slate-400">
@@ -960,42 +1088,37 @@ export default function DisputeWorkbench({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sky-400">{log.action}</span>
+                        <span className="font-bold text-sky-400 font-mono">{log.eventType}</span>
                         <span
                           className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-medium ${
-                            log.status === "SUCCESS"
+                            log.severity === "SUCCESS"
                               ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20"
-                              : "bg-rose-500/10 text-rose-300 border border-rose-500/20"
+                              : log.severity === "ERROR"
+                              ? "bg-rose-500/10 text-rose-300 border border-rose-500/20"
+                              : log.severity === "WARNING"
+                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/20"
+                              : "bg-slate-800 text-slate-300 border border-slate-700"
                           }`}
                         >
-                          {log.status}
+                          {log.severity}
                         </span>
                       </div>
                       <span className="text-[11px] text-slate-400">
-                        {new Date(log.submittedAt).toLocaleString()}
+                        {new Date(log.timestamp).toLocaleString()}
                       </span>
                     </div>
 
+                    <p className="text-slate-200">{log.summary}</p>
+
                     <div className="text-[11px] text-slate-400">
-                      Operator: <span className="text-slate-300 font-mono">{log.submittedBy}</span>
+                      Actor: <span className="text-slate-300 font-mono">{log.actor}</span>
+                      {log.actorId && <span className="ml-1 text-slate-400">({log.actorId})</span>}
                     </div>
 
-                    {log.payloadSent && (
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Payload Sent:</span>
-                        <pre className="text-[10px] font-mono text-slate-300 bg-slate-900 p-2 rounded overflow-x-auto max-h-24">
-                          {log.payloadSent}
-                        </pre>
-                      </div>
-                    )}
-
-                    {log.paypalResponse && (
-                      <div>
-                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">PayPal API Response:</span>
-                        <pre className="text-[10px] font-mono text-emerald-300 bg-slate-900 p-2 rounded overflow-x-auto max-h-24">
-                          {log.paypalResponse}
-                        </pre>
-                      </div>
+                    {log.detailsJson && (
+                      <pre className="text-[10px] font-mono text-slate-300 bg-slate-900 p-2.5 rounded overflow-x-auto max-h-24">
+                        {log.detailsJson}
+                      </pre>
                     )}
                   </div>
                 ))}

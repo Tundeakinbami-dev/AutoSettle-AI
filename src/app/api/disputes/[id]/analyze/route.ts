@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { analyzeDispute, DisputeContext } from "@/lib/ai-agent";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function POST(
   req: NextRequest,
@@ -14,10 +15,12 @@ export async function POST(
         OR: [{ id }, { paypalDisputeId: id }],
       },
       include: {
+        transaction: true,
         order: true,
         trackingInfo: true,
         messages: true,
         evidenceItems: true,
+        draftResponses: { orderBy: { version: "desc" }, take: 1 },
       },
     });
 
@@ -28,9 +31,9 @@ export async function POST(
       );
     }
 
-    // Retrieve merchant settings for optional API keys
-    const settings = await prisma.merchantSettings.findFirst({
-      where: { id: "default" },
+    // Retrieve PayPal connection / API settings
+    const connection = await prisma.payPalConnection.findFirst({
+      where: { merchantId: dispute.merchantId },
     });
 
     let parsedItems: any[] = [];
@@ -50,7 +53,7 @@ export async function POST(
       currency: dispute.currency,
       buyerName: dispute.buyerName,
       buyerEmail: dispute.buyerEmail,
-      sellerTransactionId: dispute.sellerTransactionId,
+      sellerTransactionId: dispute.transaction?.sellerTransactionId || dispute.paypalDisputeId,
       responseDueDate: dispute.responseDueDate,
       order: dispute.order
         ? {
@@ -91,10 +94,10 @@ export async function POST(
     };
 
     // Execute AI Agent analysis
-    const analysisResult = await analyzeDispute(context, settings?.openAiApiKey || undefined);
+    const analysisResult = await analyzeDispute(context);
 
-    // Save or update analysis in DB
-    const savedAnalysis = await prisma.disputeAnalysis.upsert({
+    // Save or update AiAnalysis in DB
+    const savedAnalysis = await prisma.aiAnalysis.upsert({
       where: { disputeId: dispute.id },
       create: {
         disputeId: dispute.id,
@@ -104,9 +107,9 @@ export async function POST(
         recommendationRationale: analysisResult.recommendationRationale,
         keyStrengthsJson: JSON.stringify(analysisResult.keyStrengths),
         criticalGapsJson: JSON.stringify(analysisResult.criticalGaps),
-        rebuttalDraft: analysisResult.rebuttalDraft,
         citationsJson: JSON.stringify(analysisResult.citations),
         riskLevel: analysisResult.riskLevel,
+        antiHallucinationVerified: true,
       },
       update: {
         summary: analysisResult.summary,
@@ -115,42 +118,71 @@ export async function POST(
         recommendationRationale: analysisResult.recommendationRationale,
         keyStrengthsJson: JSON.stringify(analysisResult.keyStrengths),
         criticalGapsJson: JSON.stringify(analysisResult.criticalGaps),
-        rebuttalDraft: analysisResult.rebuttalDraft,
         citationsJson: JSON.stringify(analysisResult.citations),
         riskLevel: analysisResult.riskLevel,
         updatedAt: new Date(),
       },
     });
 
-    // Update dispute entity
+    // Create or update DraftResponse with status: NEEDS_REVIEW
+    const latestDraft = dispute.draftResponses[0];
+    if (latestDraft && latestDraft.status !== "SUBMITTED") {
+      await prisma.draftResponse.update({
+        where: { id: latestDraft.id },
+        data: {
+          status: "NEEDS_REVIEW",
+          targetAction: analysisResult.recommendedAction,
+          rebuttalNarrative: analysisResult.rebuttalDraft,
+          characterCount: analysisResult.rebuttalDraft.length,
+          isApproved: false,
+          updatedAt: new Date(),
+        },
+      });
+    } else {
+      await prisma.draftResponse.create({
+        data: {
+          disputeId: dispute.id,
+          version: (latestDraft?.version || 0) + 1,
+          status: "NEEDS_REVIEW",
+          targetAction: analysisResult.recommendedAction,
+          rebuttalNarrative: analysisResult.rebuttalDraft,
+          characterCount: analysisResult.rebuttalDraft.length,
+          isApproved: false,
+        },
+      });
+    }
+
+    // Update dispute workflow status: NEEDS_REVIEW
     await prisma.dispute.update({
       where: { id: dispute.id },
       data: {
-        aiAnalyzed: true,
-        aiConfidenceScore: analysisResult.completenessScore,
-        aiRecommendedAction: analysisResult.recommendedAction,
+        responseWorkflowStatus: "NEEDS_REVIEW",
       },
     });
 
-    // Create Audit Log entry
-    await prisma.submissionAuditLog.create({
-      data: {
-        disputeId: dispute.id,
-        action: "AUTO_ANALYZED",
-        status: "SUCCESS",
-        payloadSent: JSON.stringify({
-          model: settings?.openAiApiKey ? "gpt-4o" : "deterministic-factual-engine",
-          completeness: analysisResult.completenessScore,
-          action: analysisResult.recommendedAction,
-        }),
-        submittedBy: "autosettle_agent",
+    // Record Audit Log entry
+    await recordAuditLog({
+      disputeId: dispute.id,
+      merchantId: dispute.merchantId,
+      eventType: "AI_ANALYSIS_GENERATED",
+      severity: "SUCCESS",
+      summary: `AI Agent generated analysis: ${analysisResult.completenessScore}% completeness. Action: ${analysisResult.recommendedAction}. Ready for merchant review.`,
+      details: {
+        completenessScore: analysisResult.completenessScore,
+        recommendedAction: analysisResult.recommendedAction,
+        riskLevel: analysisResult.riskLevel,
+        keyStrengthsCount: analysisResult.keyStrengths.length,
+        criticalGapsCount: analysisResult.criticalGaps.length,
+        workflowStatus: "NEEDS_REVIEW",
       },
+      actor: "ai_agent",
     });
 
     return NextResponse.json({
       success: true,
       analysis: savedAnalysis,
       result: analysisResult,
+      workflowStatus: "NEEDS_REVIEW",
     });
   } catch (error: any) {
     console.error("POST /api/disputes/[id]/analyze error:", error);

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { recordAuditLog } from "@/lib/audit";
 
 export async function POST(
   req: NextRequest,
@@ -49,18 +50,31 @@ export async function POST(
         fileType: "application/pdf",
         strength,
         verified: true,
+        provenanceSource: "Merchant Upload",
       },
     });
 
-    // Re-trigger analysis flag so merchant is prompted or can re-analyze with newly attached evidence
+    // Reset workflow status to NEEDS_REVIEW when new evidence is attached
     await prisma.dispute.update({
       where: { id: dispute.id },
-      data: { aiAnalyzed: false },
+      data: { responseWorkflowStatus: "NEEDS_REVIEW" },
+    });
+
+    // Record audit log for evidence added
+    await recordAuditLog({
+      disputeId: dispute.id,
+      merchantId: dispute.merchantId,
+      eventType: "EVIDENCE_ADDED",
+      severity: "INFO",
+      summary: `Evidence added to locker: "${title}" (${evidenceType})`,
+      details: { title, evidenceType, strength },
+      actor: "merchant_user",
     });
 
     return NextResponse.json({
       success: true,
       evidence,
+      workflowStatus: "NEEDS_REVIEW",
       message: "Evidence item successfully attached to locker.",
     });
   } catch (error: any) {
