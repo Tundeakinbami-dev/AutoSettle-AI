@@ -1,0 +1,83 @@
+@import "ag-grid-community/styles/ag-grid.css";
+@import "ag-grid-community/styles/ag-theme-quartz.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #090d16;
+  --foreground: #f1f5f9;
+  --card-bg: #111827;
+  --card-border: #1f2937;
+  --paypal-blue: #0070ba;
+  --paypal-dark: #003087;
+  --paypal-cyan: #00cfde;
+}
+
+body {
+  color: var(--foreground);
+  background-color: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* Custom AG Grid Dark Theme Overrides */
+.ag-theme-quartz-dark {
+  --ag-background-color: #0d131f;
+  --ag-header-background-color: #111a2e;
+  --ag-header-foreground-color: #94a3b8;
+  --ag-data-color: #f1f5f9;
+  --ag-border-color: #1e293b;
+  --ag-row-hover-color: #17233d;
+  --ag-selected-row-background-color: rgba(0, 112, 186, 0.2);
+  --ag-font-family: inherit;
+  --ag-font-size: 13px;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid #1e293b;
+}
+
+.ag-theme-quartz-dark .ag-header-cell {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #090d16;
+}
+::-webkit-scrollbar-thumb {
+  background: #23314d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #33456b;
+}
+
+/* Glassmorphism helpers */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-card {
+  background: linear-gradient(135deg, rgba(25, 34, 53, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Glowing accent effects */
+.glow-blue {
+  box-shadow: 0 0 25px -5px rgba(0, 112, 186, 0.35);
+}
+
+.glow-urgent {
+  box-shadow: 0 0 20px -3px rgba(239, 68, 68, 0.4);
+}

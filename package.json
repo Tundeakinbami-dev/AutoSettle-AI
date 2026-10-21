@@ -1,0 +1,40 @@
+{
+  "name": "autosettle-ai",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "npx -y ts-node -O '{\"module\":\"commonjs\"}' src/tests/dispute-workflow.test.ts",
+    "seed": "npx -y ts-node -O '{\"module\":\"commonjs\"}' prisma/seed.ts"
+  },
+  "prisma": {
+    "seed": "npx -y ts-node -O '{\"module\":\"commonjs\"}' prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "ag-grid-community": "^31.3.4",
+    "ag-grid-react": "^31.3.4",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.4.0",
+    "lucide-react": "^1.61.0",
+    "next": "14.2.15",
+    "react": "^18",
+    "react-dom": "^18",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "eslint": "^8",
+    "eslint-config-next": "14.2.15",
+    "postcss": "^8",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}

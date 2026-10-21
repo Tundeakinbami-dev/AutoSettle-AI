@@ -1,0 +1,153 @@
+// AutoSettle AI - Prisma Schema
+// Persistent Dispute Operations, Evidence Locker & AI Analysis Storage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Dispute {
+  id                    String            @id @default(cuid())
+  paypalDisputeId       String            @unique
+  status                String            // UNDER_REVIEW, REQUIRED_ACTION, RESOLVED, WAITING_FOR_SELLER, etc.
+  disputeLifeCycleStage String            // INQUIRY, CHARGEBACK, PRE_ARBITRATION, CLAIM
+  reason                String            // MERCHANDISE_OR_SERVICE_NOT_RECEIVED, UNAUTHORISED, NOT_AS_DESCRIBED, CANCELLED_RECURRING_BILLING
+  disputeAmount         Float
+  currency              String            @default("USD")
+  buyerId               String?
+  buyerName             String
+  buyerEmail            String
+  sellerTransactionId   String
+  createTime            DateTime          @default(now())
+  responseDueDate       DateTime
+  externalReasonCode    String?
+  merchantNotes         String?
+  aiAnalyzed            Boolean           @default(false)
+  aiConfidenceScore     Int?              // 0 to 100
+  aiRecommendedAction   String?           // PROVIDE_EVIDENCE, ACCEPT_CLAIM, OFFER_PARTIAL_REFUND, REQUEST_MORE_INFO
+  resolutionOutcome     String?           // WON, LOST, ACCEPTED, SETTLED
+  isLiveSandbox         Boolean           @default(false)
+
+  // Relations
+  order                 Order?
+  trackingInfo          TrackingInfo?
+  messages              CustomerMessage[]
+  evidenceItems         EvidenceItem[]
+  analysis              DisputeAnalysis?
+  auditLogs             SubmissionAuditLog[]
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  disputeId       String      @unique
+  dispute         Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  orderNumber     String
+  orderDate       DateTime
+  customerName    String
+  customerEmail   String
+  shippingAddress String
+  billingAddress  String
+  orderTotal      Float
+  currency        String      @default("USD")
+  itemsJson       String      // Serialized JSON of order line items
+  paymentMethod   String      @default("PayPal")
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model TrackingInfo {
+  id              String      @id @default(cuid())
+  disputeId       String      @unique
+  dispute         Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  carrier         String      // UPS, FEDEX, USPS, DHL
+  trackingNumber  String
+  status          String      // DELIVERED, IN_TRANSIT, EXCEPTION, OUT_FOR_DELIVERY
+  shippedDate     DateTime?
+  deliveredDate   DateTime?
+  destinationZip  String?
+  signedBy        String?
+  deliveryProofUrl String?
+  checkpointHistory String?   // JSON array of carrier scans
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model CustomerMessage {
+  id          String      @id @default(cuid())
+  disputeId   String
+  dispute     Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  sender      String      // BUYER, MERCHANT, SYSTEM
+  channel     String      // PAYPAL_MESSAGE, EMAIL, LIVE_CHAT
+  timestamp   DateTime
+  messageText String
+  sentiment   String?     // NEUTRAL, FRUSTRATED, COOPERATIVE
+  createdAt   DateTime    @default(now())
+}
+
+model EvidenceItem {
+  id              String      @id @default(cuid())
+  disputeId       String
+  dispute         Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  evidenceType    String      // PROOF_OF_DELIVERY, PROOF_OF_FULFILLMENT, REFUND_POLICY, CUSTOMER_COMMUNICATION, TERMS_OF_SERVICE
+  title           String
+  description     String
+  fileUrl         String?
+  fileName        String?
+  fileType        String?     // application/pdf, image/png, text/plain
+  fileSize        Int?
+  strength        String      @default("STRONG") // STRONG, MODERATE, WEAK
+  verified        Boolean     @default(true)
+  paypalDocId     String?     // Associated PayPal document ID if uploaded
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model DisputeAnalysis {
+  id                      String      @id @default(cuid())
+  disputeId               String      @unique
+  dispute                 Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  summary                 String
+  completenessScore       Int         // 0 - 100
+  recommendedAction       String      // PROVIDE_EVIDENCE, ACCEPT_CLAIM, OFFER_PARTIAL_REFUND
+  recommendationRationale String
+  keyStrengthsJson        String      // Array of strings in JSON
+  criticalGapsJson        String      // Array of strings in JSON
+  rebuttalDraft           String      // Factual merchant response draft
+  citationsJson           String      // Evidence mapping citations
+  riskLevel               String      // LOW, MEDIUM, HIGH
+  generatedAt             DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
+}
+
+model SubmissionAuditLog {
+  id              String      @id @default(cuid())
+  disputeId       String
+  dispute         Dispute     @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  action          String      // PROVIDE_EVIDENCE, ACCEPT_CLAIM, APPEAL, SYNC_STATUS, AUTO_ANALYZED
+  status          String      // SUCCESS, FAILED, PENDING_APPROVAL
+  payloadSent     String?     // JSON of what was dispatched
+  paypalResponse  String?     // JSON of PayPal Disputes API response
+  submittedBy     String      @default("merchant_authorized")
+  submittedAt     DateTime    @default(now())
+}
+
+model MerchantSettings {
+  id                      String      @id @default("default")
+  businessName            String      @default("Apex Gear Outfitters")
+  supportEmail            String      @default("support@apexgear.example.com")
+  paypalClientId          String?
+  paypalClientSecret      String?
+  paypalEnvironment       String      @default("sandbox") // sandbox or live
+  openAiApiKey            String?
+  autoAnalyzeOnArrival    Boolean     @default(true)
+  strictEvidenceEnforced  Boolean     @default(true)
+  webhookSecret           String?
+  updatedAt               DateTime    @updatedAt
+}
