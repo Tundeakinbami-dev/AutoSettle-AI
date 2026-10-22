@@ -139,13 +139,17 @@ export async function POST(
     }
 
     // Step 2: Dispatch to PayPal Disputes Client
+    // Determine operating mode from merchant settings
+    const merchantMode = dispute.merchant?.mode ?? "DEMO"; // default DEMO
+    const useSimulation = merchantMode === "DEMO";
+
     const connection = await prisma.payPalConnection.findFirst({
       where: { merchantId: dispute.merchantId },
     });
 
     const paypalClient = new PayPalDisputesClient({
-      clientId: connection?.clientId || undefined,
-      clientSecret: connection?.clientSecret || undefined,
+      clientId: useSimulation ? undefined : connection?.clientId,
+      clientSecret: useSimulation ? undefined : connection?.clientSecret,
       environment: (connection?.environment as any) || "sandbox",
     });
 

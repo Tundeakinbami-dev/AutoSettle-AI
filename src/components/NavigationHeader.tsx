@@ -74,6 +74,11 @@ export default function NavigationHeader({
             <span className="font-medium text-slate-200">
               {isSandboxLive ? "Live Sandbox Active" : "Sandbox Simulation Mode"}
             </span>
+            {!isSandboxLive && (
+              <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Demo Data
+              </span>
+            )}
           </div>
 
           {urgentCount > 0 && (

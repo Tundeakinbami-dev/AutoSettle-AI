@@ -118,6 +118,9 @@ OPENAI_API_KEY=""
 OPENAI_MODEL="gpt-4o"
 ```
 
+> **Note:** When `APP_MODE` is set to `DEMO`, the UI displays a **"Demo Data"** badge in the navigation header (next to the PayPal API mode indicator) to clearly label that all displayed disputes and evidence are synthetic and no real PayPal API calls are made.
+
+
 ---
 
 ## 🚢 Production Deployment (Render)

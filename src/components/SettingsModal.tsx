@@ -14,6 +14,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
   const [paypalClientId, setPaypalClientId] = useState("");
   const [paypalClientSecret, setPaypalClientSecret] = useState("");
   const [paypalEnvironment, setPaypalEnvironment] = useState("sandbox");
+  const [mode, setMode] = useState("DEMO"); // DEMO or SANDBOX
   const [requireHumanApproval, setRequireHumanApproval] = useState(true); // DEFAULT: TRUE
   const [autoAnalyzeOnArrival, setAutoAnalyzeOnArrival] = useState(true);
   const [strictEvidenceEnforced, setStrictEvidenceEnforced] = useState(true);
@@ -61,6 +62,7 @@ export default function SettingsModal({ onClose, onSaved }: SettingsModalProps) 
           paypalClientId,
           paypalClientSecret,
           paypalEnvironment,
+          mode,
           requireHumanApproval,
           autoAnalyzeOnArrival,
           strictEvidenceEnforced,
