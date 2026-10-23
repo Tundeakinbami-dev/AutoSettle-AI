@@ -1,10 +1,5 @@
 // AutoSettle AI - Comprehensive Merchant Dispute Domain Schema
 
-enum AppMode {
-  DEMO
-  SANDBOX
-}
-
 // Built for PayPal AI Hackathon 2026
 
 generator client {
@@ -18,7 +13,7 @@ datasource db {
 
 // 1. Merchant Profile & Global Settings
 model Merchant {
-  mode                    AppMode            @default(DEMO) // DEMO or SANDBOX mode
+  mode                    String            @default("DEMO") // DEMO or SANDBOX mode
   id                      String            @id @default(cuid())
   businessName            String            @default("Apex Gear Outfitters")
   supportEmail            String            @default("support@apexgear.example.com")

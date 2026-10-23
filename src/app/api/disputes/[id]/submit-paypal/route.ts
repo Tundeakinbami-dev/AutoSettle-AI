@@ -148,8 +148,8 @@ export async function POST(
     });
 
     const paypalClient = new PayPalDisputesClient({
-      clientId: useSimulation ? undefined : connection?.clientId,
-      clientSecret: useSimulation ? undefined : connection?.clientSecret,
+      clientId: useSimulation ? undefined : (connection?.clientId ?? undefined),
+      clientSecret: useSimulation ? undefined : (connection?.clientSecret ?? undefined),
       environment: (connection?.environment as any) || "sandbox",
     });
 

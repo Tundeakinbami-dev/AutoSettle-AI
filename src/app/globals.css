@@ -1,83 +1,472 @@
 @import "ag-grid-community/styles/ag-grid.css";
 @import "ag-grid-community/styles/ag-theme-quartz.css";
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600;1,700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #090d16;
-  --foreground: #f1f5f9;
-  --card-bg: #111827;
-  --card-border: #1f2937;
-  --paypal-blue: #0070ba;
-  --paypal-dark: #003087;
-  --paypal-cyan: #00cfde;
+  --font-plus-jakarta: 'Plus Jakarta Sans', sans-serif;
+  --background: #F4F6FA;
+  --foreground: #0F172A;
+  --card-bg: #FFFFFF;
+  --card-border: #EAECF0;
+  --sidebar-bg: #0C1322;
+  --sidebar-border: #162032;
+  --primary-accent: #2563EB;
 }
 
 body {
-  color: var(--foreground);
-  background-color: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #0F172A;
+  background-color: #F4F6FA;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   min-height: 100vh;
+  letter-spacing: -0.012em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom AG Grid Dark Theme Overrides */
-.ag-theme-quartz-dark {
-  --ag-background-color: #0d131f;
-  --ag-header-background-color: #111a2e;
-  --ag-header-foreground-color: #94a3b8;
-  --ag-data-color: #f1f5f9;
-  --ag-border-color: #1e293b;
-  --ag-row-hover-color: #17233d;
-  --ag-selected-row-background-color: rgba(0, 112, 186, 0.2);
+/* ==========================================================================
+   Dribbble Subscription Billing Dashboard - High Contrast Luxury SaaS Theme
+   ========================================================================== */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  background-color: #F4F6FA;
+}
+
+/* Dark Luxury Sidebar */
+.sidebar-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #0B111E;
+  border-right: 1px solid #162032;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+  box-shadow: 2px 0 16px rgba(0, 0, 0, 0.08);
+}
+
+.sidebar-expanded {
+  width: 252px;
+}
+
+.sidebar-collapsed {
+  width: 76px;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 18px;
+  border-bottom: 1px solid #162032;
+  gap: 12px;
+}
+
+.brand-logo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  flex-shrink: 0;
+}
+
+.brand-logo-icon {
+  width: 20px;
+  height: 20px;
+  color: #FFFFFF;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.brand-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #FFFFFF;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+}
+
+.brand-accent {
+  color: #38BDF8;
+}
+
+.brand-tagline {
+  font-size: 11px;
+  color: #64748B;
+  white-space: nowrap;
+}
+
+.sidebar-collapse-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: #141C2D;
+  border: 1px solid #1E293B;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94A3B8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sidebar-collapse-btn:hover {
+  background: #1E293B;
+  color: #FFFFFF;
+}
+
+.sidebar-collapse-icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s ease;
+}
+
+.sidebar-alert {
+  margin: 14px 14px 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #F87171;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-alert-icon {
+  width: 14px;
+  height: 14px;
+  color: #EF4444;
+  flex-shrink: 0;
+}
+
+.sidebar-nav-section {
+  flex: 1;
+  padding: 18px 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.sidebar-nav-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #475569;
+  font-weight: 700;
+  padding: 4px 10px 8px;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: #94A3B8;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+  cursor: pointer;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #FFFFFF;
+}
+
+.sidebar-nav-item-active {
+  background: linear-gradient(135deg, #2563EB 0%, #4F46E5 100%) !important;
+  color: #FFFFFF !important;
+  font-weight: 600;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-nav-item-collapsed {
+  justify-content: center;
+  padding: 10px;
+}
+
+.sidebar-nav-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #94A3B8;
+}
+
+.sidebar-nav-item:hover .sidebar-nav-icon {
+  color: #FFFFFF;
+}
+
+.sidebar-nav-icon-active {
+  color: #FFFFFF !important;
+}
+
+.sidebar-nav-text {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.sidebar-nav-badge {
+  background: #EF4444;
+  color: #FFFFFF;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  margin-left: auto;
+}
+
+.sidebar-bottom {
+  padding: 14px;
+  border-top: 1px solid #162032;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-bottom-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sidebar-user-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #111A2B;
+  border: 1px solid #1A2840;
+  margin-top: 6px;
+}
+
+.sidebar-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563EB, #4F46E5);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.sidebar-user-avatar-sm {
+  width: 34px;
+  height: 34px;
+  margin: 6px auto;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #2563EB, #4F46E5);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sidebar-user-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.sidebar-user-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #FFFFFF;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-email {
+  font-size: 10px;
+  color: #64748B;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user-logout {
+  color: #64748B;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.sidebar-user-logout:hover {
+  color: #EF4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* ==========================================================================
+   Content Wrapper & Header Bar
+   ========================================================================== */
+
+.content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: #F4F6FA;
+}
+
+.top-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid #E5E7EB;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  gap: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.header-search-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #F1F4F9;
+  border: 1px solid #E2E8F0;
+  border-radius: 11px;
+  padding: 7px 14px;
+  width: 100%;
+  max-width: 380px;
+  transition: all 0.2s ease;
+}
+
+.header-search-container:focus-within {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  background: #FFFFFF;
+}
+
+.header-search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: #0F172A;
+  width: 100%;
+}
+
+.header-search-input::placeholder {
+  color: #94A3B8;
+}
+
+.header-kbd {
+  font-size: 10px;
+  font-family: inherit;
+  color: #64748B;
+  background: #E2E8F0;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Metric Card Dribbble Style */
+.metric-card-dribbble {
+  background: #FFFFFF;
+  border: 1px solid #EAECF0;
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04), 0 10px 15px -3px rgba(16, 24, 40, 0.02);
+}
+
+.metric-card-dribbble:hover {
+  border-color: #CBD5E1;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+}
+
+/* AG Grid Light Theme Custom Overrides */
+.ag-theme-quartz {
+  --ag-background-color: #FFFFFF;
+  --ag-header-background-color: #F8FAFC;
+  --ag-header-foreground-color: #475569;
+  --ag-data-color: #0F172A;
+  --ag-border-color: #EAECF0;
+  --ag-row-hover-color: #F8FAFC;
+  --ag-selected-row-background-color: #EFF6FF;
   --ag-font-family: inherit;
   --ag-font-size: 13px;
-  border-radius: 0.75rem;
+  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid #1e293b;
+  border: 1px solid #EAECF0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
-.ag-theme-quartz-dark .ag-header-cell {
-  font-weight: 600;
+.ag-theme-quartz .ag-header-cell {
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   font-size: 11px;
 }
 
 /* Custom scrollbars */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #090d16;
+  background: #F1F4F9;
 }
 ::-webkit-scrollbar-thumb {
-  background: #23314d;
+  background: #CBD5E1;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #33456b;
+  background: #94A3B8;
 }
 
-/* Glassmorphism helpers */
-.glass-panel {
-  background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-}
-
-.glass-card {
-  background: linear-gradient(135deg, rgba(25, 34, 53, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-/* Glowing accent effects */
-.glow-blue {
-  box-shadow: 0 0 25px -5px rgba(0, 112, 186, 0.35);
-}
-
-.glow-urgent {
-  box-shadow: 0 0 20px -3px rgba(239, 68, 68, 0.4);
-}

@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+
+const plusJakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-plus-jakarta",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "AutoSettle AI — Autonomous PayPal Dispute Resolution & Evidence Orchestration",
@@ -21,8 +29,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-[#080c14] text-slate-100 antialiased min-h-screen selection:bg-sky-500/30 selection:text-sky-200">
+    <html lang="en" className={plusJakarta.variable}>
+      <body className={`${plusJakarta.className} bg-[#F4F6FA] text-slate-900 antialiased min-h-screen selection:bg-blue-600/15 selection:text-blue-900`}>
         {children}
       </body>
     </html>

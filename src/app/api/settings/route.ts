@@ -48,9 +48,9 @@ export async function GET(_: NextRequest) {
       strictEvidenceEnforced: merchant.strictEvidenceEnforced,
       mode: (merchant as any).mode ?? "DEMO",
     };
-    if (merchant.payPalConnection) {
-      data.paypalEnvironment = merchant.payPalConnection.environment;
-      if (merchant.payPalConnection.clientId) data.paypalClientId = merchant.payPalConnection.clientId;
+    if (merchant.paypalConnection) {
+      data.paypalEnvironment = merchant.paypalConnection.environment;
+      if (merchant.paypalConnection.clientId) data.paypalClientId = merchant.paypalConnection.clientId;
       // Never expose secret in GET – client can leave blank to keep existing.
     }
     return NextResponse.json({ success: true, settings: data });
