@@ -46,8 +46,8 @@ export class PayPalDisputesClient {
   private isConfigured: boolean;
 
   constructor(config?: Partial<PayPalConfig>) {
-    this.clientId = config?.clientId || process.env.PAYPAL_CLIENT_ID || "";
-    this.clientSecret = config?.clientSecret || process.env.PAYPAL_CLIENT_SECRET || "";
+    this.clientId = config?.clientId !== undefined ? config.clientId : (process.env.PAYPAL_CLIENT_ID || "");
+    this.clientSecret = config?.clientSecret !== undefined ? config.clientSecret : (process.env.PAYPAL_CLIENT_SECRET || "");
     const env = config?.environment || process.env.PAYPAL_ENVIRONMENT || "sandbox";
     this.baseUrl = env === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com";
     this.isConfigured = Boolean(this.clientId && this.clientSecret && this.clientId.trim() !== "");
