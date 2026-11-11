@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Sparkles,
@@ -151,6 +151,8 @@ export default function DisputeWorkbench({
   const [activeTab, setActiveTab] = useState<"ANALYSIS" | "REBUTTAL" | "EVIDENCE" | "SUBMIT" | "AUDIT">("ANALYSIS");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null);
   const [rebuttalText, setRebuttalText] = useState(
     dispute.draftResponses[0]?.rebuttalNarrative || ""
   );
@@ -161,8 +163,23 @@ export default function DisputeWorkbench({
     "PROVIDE_EVIDENCE"
   );
   const [authorizedByMerchant, setAuthorizedByMerchant] = useState(
-    dispute.responseWorkflowStatus === "APPROVED" || dispute.responseWorkflowStatus === "SUBMITTED"
+    dispute.responseWorkflowStatus === "APPROVED" ||
+    dispute.responseWorkflowStatus === "SUBMITTED" ||
+    Boolean(dispute.draftResponses[0]?.isApproved)
   );
+
+  useEffect(() => {
+    if (
+      dispute.responseWorkflowStatus === "APPROVED" ||
+      dispute.responseWorkflowStatus === "SUBMITTED" ||
+      Boolean(dispute.draftResponses[0]?.isApproved)
+    ) {
+      setAuthorizedByMerchant(true);
+    }
+    if (dispute.draftResponses[0]?.rebuttalNarrative && !rebuttalText) {
+      setRebuttalText(dispute.draftResponses[0].rebuttalNarrative);
+    }
+  }, [dispute.responseWorkflowStatus, dispute.draftResponses]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<any | null>(null);
   const [offerAmount, setOfferAmount] = useState<string>((dispute.disputeAmount * 0.5).toFixed(2));
@@ -232,19 +249,28 @@ export default function DisputeWorkbench({
   // Grant Human Approval
   const handleGrantApproval = async () => {
     setIsApproving(true);
+    setApprovalError(null);
+    setApprovalSuccess(null);
     try {
       const res = await fetch(`/api/disputes/${dispute.id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approver: "merchant_compliance_reviewer" }),
+        body: JSON.stringify({
+          approver: "merchant_compliance_reviewer",
+          rebuttalNarrative: rebuttalText,
+        }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
         setAuthorizedByMerchant(true);
+        setApprovalSuccess(data.message || "Draft approved! Status updated to Approved.");
         onRefresh();
+      } else {
+        setApprovalError(data.error || `Approval failed with status ${res.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Approval error:", err);
+      setApprovalError(err.message || "Network error while approving draft.");
     } finally {
       setIsApproving(false);
     }
@@ -636,36 +662,58 @@ export default function DisputeWorkbench({
               />
 
               {/* Human Approval Action Banner */}
-              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-950/30 via-slate-900 to-slate-950 border border-indigo-500/30 flex items-center justify-between flex-wrap gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center shrink-0">
-                    <UserCheck className="w-5 h-5 text-indigo-400" />
+              <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-950/30 via-slate-900 to-slate-950 border border-indigo-500/30 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                      <UserCheck className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-semibold text-slate-200">
+                        Human Approval Gate (Mandatory by Default)
+                      </h5>
+                      <p className="text-[11px] text-slate-400">
+                        {dispute.responseWorkflowStatus === "APPROVED" || dispute.draftResponses[0]?.isApproved
+                          ? `Approved by ${dispute.draftResponses[0]?.approvedBy || "merchant"}. Submission unlocked.`
+                          : "A draft must never be submitted automatically. Click Approve Response to certify factual accuracy."}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h5 className="text-xs font-semibold text-slate-200">
-                      Human Approval Gate (Mandatory by Default)
-                    </h5>
-                    <p className="text-[11px] text-slate-400">
-                      {dispute.responseWorkflowStatus === "APPROVED"
-                        ? `Approved by ${dispute.draftResponses[0]?.approvedBy || "merchant"}. Submission unlocked.`
-                        : "A draft must never be submitted automatically. Click Approve Response to certify factual accuracy."}
-                    </p>
-                  </div>
+
+                  {dispute.responseWorkflowStatus !== "APPROVED" &&
+                  dispute.responseWorkflowStatus !== "SUBMITTED" &&
+                  !dispute.draftResponses[0]?.isApproved ? (
+                    <button
+                      onClick={handleGrantApproval}
+                      disabled={isApproving}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md transition-all"
+                    >
+                      {isApproving ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      <span>{isApproving ? "Approving..." : "Approve Response Draft"}</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-3 py-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Approved & Ready</span>
+                    </div>
+                  )}
                 </div>
 
-                {dispute.responseWorkflowStatus !== "APPROVED" && dispute.responseWorkflowStatus !== "SUBMITTED" ? (
-                  <button
-                    onClick={handleGrantApproval}
-                    disabled={isApproving}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
-                  >
-                    <Check className={`w-3.5 h-3.5 ${isApproving ? "animate-spin" : ""}`} />
-                    <span>{isApproving ? "Approving..." : "Approve Response Draft"}</span>
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold px-3 py-1.5 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Approved & Ready</span>
+                {/* Feedback Alerts */}
+                {approvalSuccess && (
+                  <div className="p-3 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span>{approvalSuccess}</span>
+                  </div>
+                )}
+                {approvalError && (
+                  <div className="p-3 rounded-lg bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                    <span>{approvalError}</span>
                   </div>
                 )}
               </div>

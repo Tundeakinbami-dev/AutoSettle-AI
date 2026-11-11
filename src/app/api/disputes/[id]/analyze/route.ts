@@ -4,17 +4,21 @@ import { analyzeDispute } from "@/lib/ai-agent";
 import { buildDisputeContext } from "@/lib/ai-context";
 import { recordAuditLog } from "@/lib/audit";
 
+export const dynamic = "force-dynamic";
+
 /**
  * POST /api/disputes/:id/analyze
  * Forces a (re)run of the AI analysis for the given dispute.
  * Returns the analysis result and stores it in the DB.
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const { id } = params; // PayPal dispute ID (paypalDisputeId)
+  const { id } = params;
   try {
-    // Resolve internal dispute record
+    // Resolve internal dispute record by CUID or paypalDisputeId
     const dispute = await prisma.dispute.findFirst({
-      where: { paypalDisputeId: id },
+      where: {
+        OR: [{ id }, { paypalDisputeId: id }],
+      },
     });
     if (!dispute) {
       return NextResponse.json({ success: false, error: "Dispute not found" }, { status: 404 });

@@ -22,6 +22,8 @@ export default function ApprovalQueuePage() {
   const [activeTab, setActiveTab] = useState<string>("NEEDS_REVIEW");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalSuccess, setApprovalSuccess] = useState<string | null>(null);
 
   const needsReviewCount = useMemo(() => {
     return disputes.filter((d) => d.responseWorkflowStatus === "NEEDS_REVIEW").length;
@@ -45,18 +47,24 @@ export default function ApprovalQueuePage() {
 
   const handleApprove = async (disputeId: string) => {
     setApprovingId(disputeId);
+    setApprovalError(null);
+    setApprovalSuccess(null);
     try {
       const res = await fetch(`/api/disputes/${disputeId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approver: "merchant_compliance_reviewer" }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setApprovalSuccess(data.message || `Dispute approved successfully.`);
         await refreshData(true);
+      } else {
+        setApprovalError(data.error || `Approval failed with status ${res.status}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Approval error:", err);
+      setApprovalError(err.message || "Network error while approving dispute.");
     } finally {
       setApprovingId(null);
     }
@@ -199,6 +207,26 @@ export default function ApprovalQueuePage() {
           ))}
         </div>
       </div>
+
+      {/* Feedback Alerts */}
+      {approvalSuccess && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{approvalSuccess}</span>
+          </div>
+          <button onClick={() => setApprovalSuccess(null)} className="text-emerald-600 hover:text-emerald-800 font-bold ml-2">✕</button>
+        </div>
+      )}
+      {approvalError && (
+        <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{approvalError}</span>
+          </div>
+          <button onClick={() => setApprovalError(null)} className="text-rose-600 hover:text-rose-800 font-bold ml-2">✕</button>
+        </div>
+      )}
 
       {/* Approval Queue Cases */}
       <div className="space-y-4">
