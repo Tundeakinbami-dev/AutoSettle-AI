@@ -8,6 +8,7 @@ export type AuditEventType =
   | "WEBHOOK_RECEIVED"
   | "WEBHOOK_VERIFIED"
   | "WEBHOOK_VERIFICATION_FAILED"
+  | "WEBHOOK_SIMULATED"
   | "EVIDENCE_RETRIEVED"
   | "EVIDENCE_ADDED"
   | "AI_ANALYSIS_GENERATED"
@@ -28,7 +29,7 @@ export interface LogAuditParams {
   severity?: "INFO" | "WARNING" | "ERROR" | "SUCCESS";
   summary: string;
   details?: Record<string, any> | null;
-  actor?: "merchant_user" | "ai_agent" | "system_webhook" | "paypal_api" | "system" | "system_integration";
+  actor?: "merchant_user" | "ai_agent" | "system_webhook" | "paypal_api" | "system" | "system_integration" | "simulator";
   actorId?: string;
 }
 
