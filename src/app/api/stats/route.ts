@@ -6,9 +6,14 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const disputes = await prisma.dispute.findMany({
-      include: {
-        aiAnalysis: true,
-        submissionAttempts: { take: 1, orderBy: { attemptedAt: "desc" } },
+      select: {
+        id: true,
+        status: true,
+        responseDueDate: true,
+        disputeAmount: true,
+        resolutionOutcome: true,
+        responseWorkflowStatus: true,
+        aiAnalysis: { select: { id: true } },
       },
     });
 
@@ -46,19 +51,26 @@ export async function GET() {
 
     const aiAnalyzedCount = disputes.filter((d) => d.aiAnalysis !== null).length;
 
-    return NextResponse.json({
-      success: true,
-      stats: {
-        totalCount,
-        actionRequired,
-        urgentCount,
-        totalVolume,
-        winRate,
-        aiAnalyzedCount,
-        workflowCounts,
-        avgResponseMinutes: "4.2 min",
+    return NextResponse.json(
+      {
+        success: true,
+        stats: {
+          totalCount,
+          actionRequired,
+          urgentCount,
+          totalVolume,
+          winRate,
+          aiAnalyzedCount,
+          workflowCounts,
+          avgResponseMinutes: "4.2 min",
+        },
       },
-    });
+      {
+        headers: {
+          "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("GET /api/stats error:", error);
     return NextResponse.json(

@@ -55,6 +55,7 @@ interface DisputeConsoleTableProps {
 export default function DisputeConsoleTable({
   disputes,
   onSelectDispute,
+  loading = false,
 }: DisputeConsoleTableProps) {
   const [activeWorkflowFilter, setActiveWorkflowFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -347,17 +348,25 @@ export default function DisputeConsoleTable({
         </div>
       </div>
 
-      {/* AG Grid Light */}
+      {/* AG Grid Light or Loading Skeleton */}
       <div className="ag-theme-quartz w-full h-[480px]">
-        <AgGridReact
-          rowData={filteredData}
-          columnDefs={columnDefs}
-          rowHeight={64}
-          headerHeight={38}
-          suppressCellFocus={true}
-          animateRows={true}
-          overlayNoRowsTemplate='<span class="text-slate-500 text-sm">No disputes matching current filter.</span>'
-        />
+        {loading && disputes.length === 0 ? (
+          <div className="p-4 space-y-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-12 bg-slate-50 border border-slate-100 rounded-lg animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <AgGridReact
+            rowData={filteredData}
+            columnDefs={columnDefs}
+            rowHeight={64}
+            headerHeight={38}
+            suppressCellFocus={true}
+            animateRows={true}
+            overlayNoRowsTemplate='<span class="text-slate-500 text-sm">No disputes matching current filter.</span>'
+          />
+        )}
       </div>
 
       {/* Footer */}

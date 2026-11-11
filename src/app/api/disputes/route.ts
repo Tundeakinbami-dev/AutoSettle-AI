@@ -58,11 +58,18 @@ export async function GET(req: NextRequest) {
       orderBy: [{ responseDueDate: "asc" }],
     });
 
-    return NextResponse.json({
-      success: true,
-      count: disputes.length,
-      disputes,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        count: disputes.length,
+        disputes,
+      },
+      {
+        headers: {
+          "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("GET /api/disputes error:", error);
     return NextResponse.json(
