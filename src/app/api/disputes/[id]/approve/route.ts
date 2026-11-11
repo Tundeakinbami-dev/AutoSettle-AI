@@ -2,77 +2,62 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { recordAuditLog } from "@/lib/audit";
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+/**
+ * POST /api/disputes/:id/approve
+ * Marks the latest draft response as approved by the merchant.
+ * Updates dispute workflow status to APPROVED.
+ */
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const { id } = params; // PayPal dispute ID (paypalDisputeId)
   try {
-    const { id } = params;
-    const body = await req.json().catch(() => ({}));
-
+    // Find dispute and latest draft
     const dispute = await prisma.dispute.findFirst({
-      where: { OR: [{ id }, { paypalDisputeId: id }] },
-      include: {
-        draftResponses: { orderBy: { version: "desc" }, take: 1 },
-      },
+      where: { paypalDisputeId: id },
+      include: { draftResponses: { orderBy: { version: "desc" }, take: 1 } },
     });
-
     if (!dispute) {
       return NextResponse.json({ success: false, error: "Dispute not found" }, { status: 404 });
     }
-
-    const approver = body.approver || "merchant_operator";
-
-    // 1. Update latest draft response
     const latestDraft = dispute.draftResponses[0];
-    if (latestDraft) {
-      await prisma.draftResponse.update({
-        where: { id: latestDraft.id },
-        data: {
-          status: "APPROVED",
-          isApproved: true,
-          approvedBy: approver,
-          approvedAt: new Date(),
-        },
-      });
+    if (!latestDraft) {
+      return NextResponse.json({ success: false, error: "No draft response to approve" }, { status: 400 });
     }
 
-    // 2. Transition dispute state to APPROVED
-    const updatedDispute = await prisma.dispute.update({
-      where: { id: dispute.id },
+    // Update draft as approved
+    await prisma.draftResponse.update({
+      where: { id: latestDraft.id },
       data: {
-        responseWorkflowStatus: "APPROVED",
-      },
-      include: {
-        draftResponses: true,
+        isApproved: true,
+        approvedAt: new Date(),
+        approvedBy: "merchant_user", // placeholder – replace with auth user ID
+        status: "APPROVED",
       },
     });
 
-    // 3. Record audit trail
+    // Update dispute workflow status
+    await prisma.dispute.update({
+      where: { id: dispute.id },
+      data: { responseWorkflowStatus: "APPROVED" },
+    });
+
     await recordAuditLog({
       disputeId: dispute.id,
-      eventType: "APPROVAL_GRANTED",
-      severity: "SUCCESS",
-      summary: `Human approval granted by ${approver}. Response certified for PayPal Disputes API dispatch.`,
-      details: {
-        approver,
-        approvedAt: new Date().toISOString(),
-        workflowStatus: "APPROVED",
-      },
+      eventType: "RESPONSE_APPROVED",
+      severity: "INFO",
+      summary: `Merchant approved draft response version ${latestDraft.version}`,
       actor: "merchant_user",
-      actorId: approver,
     });
 
-    return NextResponse.json({
-      success: true,
-      message: "Dispute response approved. Ready for PayPal API submission.",
-      dispute: updatedDispute,
+    return NextResponse.json({ success: true, draftId: latestDraft.id });
+  } catch (err: any) {
+    console.error("POST /api/disputes/[id]/approve error:", err);
+    await recordAuditLog({
+      disputeId: undefined,
+      eventType: "APPROVAL_ERROR",
+      severity: "ERROR",
+      summary: `Error approving draft for dispute ${id}: ${err.message}`,
+      actor: "system",
     });
-  } catch (error: any) {
-    console.error("POST /api/disputes/[id]/approve error:", error);
-    return NextResponse.json(
-      { success: false, error: error.message || "Failed to approve dispute response" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

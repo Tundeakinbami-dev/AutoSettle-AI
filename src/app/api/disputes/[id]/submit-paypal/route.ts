@@ -52,7 +52,21 @@ export async function POST(
       );
     }
 
-    // Step 1: Transition state to SUBMITTING
+    // Ensure draft is approved before submission
+    const latestDraft = dispute.draftResponses[0];
+    if (!latestDraft) {
+      return NextResponse.json({
+        success: false,
+        error: "No draft response available for submission",
+      }, { status: 400 });
+    }
+    if (!latestDraft.isApproved) {
+      return NextResponse.json({
+        success: false,
+        error: "Draft response must be approved by a merchant before submission",
+      }, { status: 403 });
+    }
+
     await prisma.dispute.update({
       where: { id: dispute.id },
       data: { responseWorkflowStatus: "SUBMITTING" },

@@ -9,6 +9,7 @@ import DisputeWorkbench from "@/components/DisputeWorkbench";
 import WebhookSimulatorModal from "@/components/WebhookSimulatorModal";
 import SettingsModal from "@/components/SettingsModal";
 import NewDisputeModal from "@/components/NewDisputeModal";
+import DemoModeBanner from "@/components/DemoModeBanner";
 import {
   Sparkles,
   CheckCircle2,

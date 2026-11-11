@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { analyzeDispute } from "@/lib/ai-agent";
+import { verifyWebhookSignature } from "@/lib/paypal-webhook";
 import { recordAuditLog, sanitizeData } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
@@ -10,7 +11,25 @@ export async function POST(req: NextRequest) {
     const eventId = body.id || `WH-EVENT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const resource = body.resource || {};
 
-    // 1. Webhook Deduplication Check (Unique Constraint)
+    const webhookId = process.env.PAYPAL_WEBHOOK_ID || "";
+    // Convert Next.js Headers object to a plain record for the verification helper
+    const headerRecord: Record<string, string> = {};
+    req.headers.forEach((value: string, key: string) => { headerRecord[key] = value; });
+    const verification = await verifyWebhookSignature(body, headerRecord, webhookId);
+
+    if (!verification.valid) {
+      await recordAuditLog({
+        disputeId: undefined,
+        eventType: "WEBHOOK_VERIFICATION_FAILED",
+        severity: "ERROR",
+        summary: `Webhook verification failed: ${verification.message}`,
+        actor: "system_webhook",
+      });
+      return NextResponse.json({
+        success: false,
+        error: "Invalid PayPal webhook signature",
+      }, { status: 400 });
+    }
     const existingEvent = await prisma.webhookEvent.findUnique({
       where: { paypalWebhookEventId: eventId },
     });

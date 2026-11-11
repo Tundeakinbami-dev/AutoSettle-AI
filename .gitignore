@@ -31,6 +31,12 @@ yarn-error.log*
 
 # local database
 prisma/dev.db
+dev.db
+*.db
+*.db-journal
+
+# evidence file storage
+storage/
 
 # vercel
 .vercel

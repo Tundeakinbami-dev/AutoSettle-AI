@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ShieldAlert,
   LayoutDashboard,
   FileText,
-  Users,
   BarChart3,
   Settings,
   HelpCircle,
@@ -13,6 +13,8 @@ import {
   ChevronRight,
   Zap,
   LogOut,
+  Brain,
+  CheckSquare,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -23,13 +25,24 @@ interface SidebarProps {
   onOpenWebhookModal?: () => void;
 }
 
+/** Items that navigate to dedicated top-level Next.js pages (router.push). */
+const PAGE_ROUTES: Record<string, string> = {
+  payments: "/payments",
+  analytics: "/analytics",
+  webhooks: "/webhooks",
+  settings: "/settings",
+};
+
+/** Nav items rendered in the sidebar */
 const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "disputes", label: "Disputes Console", icon: ShieldAlert },
-  { id: "invoices", label: "Evidence Files", icon: FileText },
-  { id: "customers", label: "Customers", icon: Users },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "webhooks", label: "Webhook Lab", icon: Webhook },
+  { id: "dashboard",  label: "Dashboard",           icon: LayoutDashboard },
+  { id: "payments",   label: "Payment Intelligence", icon: Zap },
+  { id: "disputes",   label: "Disputes Console",     icon: ShieldAlert },
+  { id: "evidence",   label: "Evidence Files",       icon: FileText },
+  { id: "ai",         label: "AI Investigations",    icon: Brain },
+  { id: "approval",   label: "Approval Queue",       icon: CheckSquare },
+  { id: "analytics",  label: "Analytics",            icon: BarChart3 },
+  { id: "webhooks",   label: "Webhook Lab",          icon: Webhook },
 ];
 
 export default function Sidebar({
@@ -40,6 +53,17 @@ export default function Sidebar({
   onOpenWebhookModal,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const router = useRouter();
+
+  const handleNavClick = (id: string) => {
+    if (PAGE_ROUTES[id]) {
+      // Navigate to a full top-level page
+      router.push(PAGE_ROUTES[id]);
+    } else {
+      // Let the parent (home page) handle in-page navigation
+      onNavChange?.(id);
+    }
+  };
 
   return (
     <aside className={`sidebar-container${collapsed ? " sidebar-collapsed" : " sidebar-expanded"}`}>
@@ -82,17 +106,10 @@ export default function Sidebar({
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeNav === item.id;
-            const isWebhook = item.id === "webhooks";
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  if (isWebhook && onOpenWebhookModal) {
-                    onOpenWebhookModal();
-                  } else {
-                    onNavChange?.(item.id);
-                  }
-                }}
+                onClick={() => handleNavClick(item.id)}
                 className={`sidebar-nav-item${isActive ? " sidebar-nav-item-active" : ""}${collapsed ? " sidebar-nav-item-collapsed" : ""}`}
                 title={collapsed ? item.label : undefined}
               >
@@ -115,7 +132,13 @@ export default function Sidebar({
       <div className="sidebar-bottom">
         <div className="sidebar-bottom-actions">
           <button
-            onClick={onOpenSettingsModal}
+            onClick={() => {
+              if (onOpenSettingsModal) {
+                onOpenSettingsModal();
+              } else {
+                router.push("/settings");
+              }
+            }}
             className={`sidebar-nav-item${collapsed ? " sidebar-nav-item-collapsed" : ""}`}
             title={collapsed ? "Settings" : undefined}
           >

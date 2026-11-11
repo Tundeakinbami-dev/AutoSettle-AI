@@ -3,13 +3,19 @@ import prisma from "./prisma";
 export type AuditEventType =
   | "DISPUTE_CREATED"
   | "DISPUTE_UPDATED"
+  | "DISPUTE_SYNCED"
+  | "DISPUTE_SYNC_FAILED"
   | "WEBHOOK_RECEIVED"
   | "WEBHOOK_VERIFIED"
+  | "WEBHOOK_VERIFICATION_FAILED"
   | "EVIDENCE_RETRIEVED"
   | "EVIDENCE_ADDED"
   | "AI_ANALYSIS_GENERATED"
+  | "AI_ANALYSIS_FAILED"
   | "RESPONSE_EDITED"
   | "APPROVAL_GRANTED"
+  | "RESPONSE_APPROVED"
+  | "APPROVAL_ERROR"
   | "SUBMISSION_ATTEMPTED"
   | "API_RESULT_RECEIVED"
   | "SUBMISSION_FAILED"
@@ -22,7 +28,7 @@ export interface LogAuditParams {
   severity?: "INFO" | "WARNING" | "ERROR" | "SUCCESS";
   summary: string;
   details?: Record<string, any> | null;
-  actor?: "merchant_user" | "ai_agent" | "system_webhook" | "paypal_api";
+  actor?: "merchant_user" | "ai_agent" | "system_webhook" | "paypal_api" | "system" | "system_integration";
   actorId?: string;
 }
 

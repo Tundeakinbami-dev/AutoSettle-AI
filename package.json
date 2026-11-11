@@ -7,11 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "npx -y ts-node -O '{\"module\":\"commonjs\"}' src/tests/dispute-workflow.test.ts",
-    "seed": "npx -y ts-node -O '{\"module\":\"commonjs\"}' prisma/seed.ts"
+    "test": "tsx src/tests/dispute-workflow.test.ts && tsx src/tests/e2e-workflow.test.ts",
+    "test:unit": "tsx src/tests/dispute-workflow.test.ts",
+    "test:e2e": "tsx src/tests/e2e-workflow.test.ts",
+    "seed": "tsx prisma/seed.ts"
   },
   "prisma": {
-    "seed": "npx -y ts-node -O '{\"module\":\"commonjs\"}' prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -30,11 +32,14 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "autoprefixer": "^10.6.2",
     "eslint": "^8",
     "eslint-config-next": "14.2.15",
-    "postcss": "^8",
+    "pdf-parse": "^1.1.1",
+    "postcss": "^8.5.32",
     "prisma": "^5.22.0",
-    "tailwindcss": "^3.4.1",
+    "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }
