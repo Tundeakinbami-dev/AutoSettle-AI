@@ -28,6 +28,8 @@ export async function POST(
       authorizedByMerchant,
       offerAmount,
       simulateError = false, // Demo toggle to test failure handling
+      executionMode: clientRequestedMode,
+      isSimulation: clientRequestedSimulation,
     } = body;
 
     const dispute = await prisma.dispute.findFirst({
@@ -102,7 +104,7 @@ export async function POST(
       process.env.APP_MODE === "SIMULATION";
 
     const merchantMode = dispute.merchant?.mode ?? "DEMO";
-    const forceSimulation = isDemoAppMode || merchantMode === "DEMO";
+    const forceSimulation = isDemoAppMode || merchantMode === "DEMO" || clientRequestedSimulation === true;
 
     const connection = await prisma.payPalConnection.findFirst({
       where: { merchantId: dispute.merchantId },

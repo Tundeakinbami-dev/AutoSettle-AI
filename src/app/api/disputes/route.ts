@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { recordAuditLog } from "@/lib/audit";
+import { PayPalDisputesClient, PayPalExecutionMode } from "@/lib/paypal";
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest) {
     const disputes = await prisma.dispute.findMany({
       where,
       include: {
+        merchant: {
+          select: { mode: true, paypalConnection: true },
+        },
         transaction: true,
         order: true,
         trackingInfo: true,
@@ -58,11 +62,47 @@ export async function GET(req: NextRequest) {
       orderBy: [{ responseDueDate: "asc" }],
     });
 
+    const isDemoAppMode =
+      process.env.APP_MODE === "DEMO" ||
+      process.env.APP_MODE === "HACKATHON" ||
+      process.env.APP_MODE === "SIMULATION";
+
+    const enrichedDisputes = disputes.map((d: any) => {
+      const merchantMode = d.merchant?.mode ?? "DEMO";
+      const forceSimulation = isDemoAppMode || merchantMode === "DEMO";
+      const connection = d.merchant?.paypalConnection;
+      const connectionEnv =
+        (connection?.environment as any) || process.env.PAYPAL_ENVIRONMENT || "sandbox";
+
+      let executionMode: PayPalExecutionMode = "INTERNAL_SIMULATION";
+      let isSimulation = true;
+
+      try {
+        const client = new PayPalDisputesClient({
+          clientId: forceSimulation ? "" : (connection?.clientId ?? undefined),
+          clientSecret: forceSimulation ? "" : (connection?.clientSecret ?? undefined),
+          environment: connectionEnv === "live" ? "live" : "sandbox",
+          isSimulation: forceSimulation,
+        });
+        executionMode = client.mode;
+        isSimulation = client.isSimulation;
+      } catch {
+        executionMode = "INTERNAL_SIMULATION";
+        isSimulation = true;
+      }
+
+      return {
+        ...d,
+        executionMode,
+        isSimulation,
+      };
+    });
+
     return NextResponse.json(
       {
         success: true,
-        count: disputes.length,
-        disputes,
+        count: enrichedDisputes.length,
+        disputes: enrichedDisputes,
       },
       {
         headers: {

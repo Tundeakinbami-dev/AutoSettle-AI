@@ -95,6 +95,42 @@ describe("AutoSettle AI - PayPal Simulation Safety & Execution Mode Tests", () =
         },
       });
     }
+
+    // Ensure dispute PP-D-47237 exists in APPROVED state for demonstration and testing
+    const existing47237 = await prisma.dispute.findUnique({
+      where: { paypalDisputeId: "PP-D-47237" },
+      include: { draftResponses: true, submissionAttempts: true },
+    });
+
+    if (!existing47237) {
+      await prisma.dispute.create({
+        data: {
+          merchantId: "default_merchant",
+          paypalDisputeId: "PP-D-47237",
+          status: "REQUIRED_ACTION",
+          disputeLifeCycleStage: "CHARGEBACK",
+          reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+          disputeAmount: 195.00,
+          currency: "USD",
+          buyerName: "Zachary Taylor",
+          buyerEmail: "z.taylor@example.com",
+          responseDueDate: new Date(Date.now() + 6 * 24 * 3600 * 1000),
+          responseWorkflowStatus: "APPROVED",
+          draftResponses: {
+            create: {
+              version: 1,
+              status: "APPROVED",
+              targetAction: "PROVIDE_EVIDENCE",
+              rebuttalNarrative: "Factual rebuttal certified and approved by compliance reviewer for order AG-95290.",
+              characterCount: 84,
+              isApproved: true,
+              approvedBy: "merchant_compliance_reviewer",
+              approvedAt: new Date(),
+            },
+          },
+        },
+      });
+    }
   });
 
   after(async () => {
@@ -365,7 +401,7 @@ describe("AutoSettle AI - PayPal Simulation Safety & Execution Mode Tests", () =
   });
 
   // -------------------------------------------------------------------------
-  // Test 9: Refreshing dispute page preserves correct submission state
+  // Test 9: Refreshing dispute page via GET preserves correct submission state
   // -------------------------------------------------------------------------
   it("9. Refreshing dispute page via GET preserves correct submission state", async () => {
     const req = new NextRequest(`http://localhost:3000/api/disputes/${testDisputeDbId}`);
@@ -377,6 +413,10 @@ describe("AutoSettle AI - PayPal Simulation Safety & Execution Mode Tests", () =
     assert.strictEqual(json.dispute.responseWorkflowStatus, "SUBMITTED");
     assert.strictEqual(json.dispute.draftResponses[0].status, "SUBMITTED");
     assert.strictEqual(json.dispute.draftResponses[0].isApproved, true);
+    assert.strictEqual(json.executionMode, "INTERNAL_SIMULATION");
+    assert.strictEqual(json.isSimulation, true);
+    assert.strictEqual(json.dispute.executionMode, "INTERNAL_SIMULATION");
+    assert.strictEqual(json.dispute.isSimulation, true);
   });
 
   // -------------------------------------------------------------------------
@@ -403,6 +443,71 @@ describe("AutoSettle AI - PayPal Simulation Safety & Execution Mode Tests", () =
       dispute25182.submissionAttempts.length,
       0,
       "PP-D-25182 must have zero submission attempts"
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Test 11: PP-D-47237 Submission Screen Inspection & Zero Request Safety
+  // -------------------------------------------------------------------------
+  it("11. Verify dispute PP-D-47237 reflects INTERNAL_SIMULATION and remains intact without submission", async () => {
+    // 1. Fetch dispute PP-D-47237 through the backend API route
+    const dispute47237 = await prisma.dispute.findUnique({
+      where: { paypalDisputeId: "PP-D-47237" },
+      include: { draftResponses: true, submissionAttempts: true },
+    });
+    assert.ok(dispute47237, "Dispute PP-D-47237 must exist in database");
+
+    const req = new NextRequest(`http://localhost:3000/api/disputes/${dispute47237.id}`);
+    const res = await getDisputeHandler(req, { params: { id: dispute47237.id } });
+    assert.strictEqual(res.status, 200, "GET /api/disputes/PP-D-47237 should return HTTP 200");
+
+    const json = await res.json();
+    assert.strictEqual(json.success, true);
+
+    // 2. Execution mode reflects actual backend mode, NOT merely a frontend label
+    assert.strictEqual(
+      json.executionMode,
+      "INTERNAL_SIMULATION",
+      "Authoritative backend execution mode must be INTERNAL_SIMULATION"
+    );
+    assert.strictEqual(
+      json.isSimulation,
+      true,
+      "Authoritative backend isSimulation must be true"
+    );
+    assert.strictEqual(
+      json.dispute.executionMode,
+      "INTERNAL_SIMULATION",
+      "Dispute object payload must include executionMode: INTERNAL_SIMULATION"
+    );
+    assert.strictEqual(
+      json.dispute.isSimulation,
+      true,
+      "Dispute object payload must include isSimulation: true"
+    );
+
+    // 3. Confirm PP-D-47237 was NOT submitted and remains APPROVED
+    assert.strictEqual(
+      json.dispute.responseWorkflowStatus,
+      "APPROVED",
+      "PP-D-47237 responseWorkflowStatus must remain APPROVED"
+    );
+    assert.strictEqual(
+      json.dispute.draftResponses[0].isApproved,
+      true,
+      "PP-D-47237 draft must remain approved"
+    );
+    assert.strictEqual(
+      json.dispute.submissionAttempts.length,
+      0,
+      "PP-D-47237 must have 0 submission attempts"
+    );
+
+    // 4. Confirm ZERO external network requests were made during inspection
+    assert.strictEqual(
+      externalFetchCallCount,
+      0,
+      "Inspection of PP-D-47237 must make ZERO external requests to PayPal"
     );
   });
 });

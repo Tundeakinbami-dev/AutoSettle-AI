@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { recordAuditLog } from "@/lib/audit";
+import { PayPalDisputesClient, PayPalExecutionMode } from "@/lib/paypal";
 
 export async function GET(
   req: NextRequest,
@@ -17,6 +18,11 @@ export async function GET(
         ],
       },
       include: {
+        merchant: {
+          include: {
+            paypalConnection: true,
+          },
+        },
         transaction: true,
         order: true,
         trackingInfo: true,
@@ -49,9 +55,46 @@ export async function GET(
       );
     }
 
+    // Determine Authoritative Backend Execution Mode for this Dispute
+    const isDemoAppMode =
+      process.env.APP_MODE === "DEMO" ||
+      process.env.APP_MODE === "HACKATHON" ||
+      process.env.APP_MODE === "SIMULATION";
+
+    const merchantMode = (dispute as any).merchant?.mode ?? "DEMO";
+    const forceSimulation = isDemoAppMode || merchantMode === "DEMO";
+
+    const connection = (dispute as any).merchant?.paypalConnection;
+    const connectionEnv =
+      (connection?.environment as any) || process.env.PAYPAL_ENVIRONMENT || "sandbox";
+
+    let executionMode: PayPalExecutionMode = "INTERNAL_SIMULATION";
+    let isSimulation = true;
+
+    try {
+      const client = new PayPalDisputesClient({
+        clientId: forceSimulation ? "" : (connection?.clientId ?? undefined),
+        clientSecret: forceSimulation ? "" : (connection?.clientSecret ?? undefined),
+        environment: connectionEnv === "live" ? "live" : "sandbox",
+        isSimulation: forceSimulation,
+      });
+      executionMode = client.mode;
+      isSimulation = client.isSimulation;
+    } catch {
+      // In case of any initialization error (e.g., prohibited live in demo), safely default to simulation
+      executionMode = "INTERNAL_SIMULATION";
+      isSimulation = true;
+    }
+
     return NextResponse.json({
       success: true,
-      dispute,
+      dispute: {
+        ...dispute,
+        executionMode,
+        isSimulation,
+      },
+      executionMode,
+      isSimulation,
     });
   } catch (error: any) {
     console.error("GET /api/disputes/[id] error:", error);

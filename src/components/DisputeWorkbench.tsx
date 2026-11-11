@@ -98,6 +98,8 @@ export interface DisputeDetail {
   merchantNotes?: string;
   resolutionOutcome?: string;
   responseWorkflowStatus: "DRAFT" | "NEEDS_REVIEW" | "APPROVED" | "SUBMITTING" | "SUBMITTED" | "SUBMISSION_FAILED" | "AWAITING_CONFIRMATION";
+  executionMode?: "INTERNAL_SIMULATION" | "PAYPAL_SANDBOX" | "PAYPAL_LIVE";
+  isSimulation?: boolean;
   transaction?: {
     sellerTransactionId: string;
     grossAmount: number;
@@ -321,6 +323,8 @@ export default function DisputeWorkbench({
           offerAmount: selectedAction === "MAKE_OFFER" ? offerAmount : undefined,
           evidenceType: dispute.trackingInfo ? "PROOF_OF_DELIVERY" : "PROOF_OF_FULFILLMENT",
           simulateError: simulateFailureToggle,
+          executionMode: dispute.executionMode || "INTERNAL_SIMULATION",
+          isSimulation: dispute.isSimulation !== false,
         }),
       });
       const data = await res.json();
@@ -961,6 +965,74 @@ export default function DisputeWorkbench({
                 {renderWorkflowPill()}
               </div>
 
+              {/* BACKEND EXECUTION MODE INDICATOR */}
+              {dispute.executionMode === "INTERNAL_SIMULATION" || dispute.isSimulation !== false ? (
+                <div className="p-4 rounded-xl border bg-emerald-950/25 border-emerald-500/40 flex items-start justify-between shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                      <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+                          INTERNAL SIMULATION MODE
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          Verified Safe
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-emerald-200 mt-1">
+                        No external PayPal request will be made.
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                        The backend is locked in internal simulation mode. All responses are generated internally with zero outbound HTTP requests to PayPal Sandbox or Live endpoints.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold bg-slate-900 border border-emerald-500/40 text-emerald-300 shrink-0 ml-3">
+                    INTERNAL_SIMULATION
+                  </span>
+                </div>
+              ) : dispute.executionMode === "PAYPAL_SANDBOX" ? (
+                <div className="p-4 rounded-xl border bg-amber-950/25 border-amber-500/40 flex items-start justify-between shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-400" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                        PAYPAL SANDBOX MODE
+                      </span>
+                      <p className="text-xs font-semibold text-amber-200 mt-1">
+                        Requests will be dispatched to api-m.sandbox.paypal.com.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold bg-slate-900 border border-amber-500/40 text-amber-300 shrink-0 ml-3">
+                    PAYPAL_SANDBOX
+                  </span>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl border bg-rose-950/25 border-rose-500/40 flex items-start justify-between shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                      <AlertCircle className="w-5 h-5 text-rose-400" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-rose-300">
+                        PAYPAL LIVE MODE
+                      </span>
+                      <p className="text-xs font-semibold text-rose-200 mt-1">
+                        Live financial dispute actions will be submitted to PayPal production.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold bg-slate-900 border border-rose-500/40 text-rose-300 shrink-0 ml-3">
+                    PAYPAL_LIVE
+                  </span>
+                </div>
+              )}
+
               {/* Action Selector */}
               <div>
                 <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block mb-2">
@@ -1048,14 +1120,21 @@ export default function DisputeWorkbench({
               </div>
 
               {/* Submission CTA */}
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-mono">
-                  POST /v1/customer/disputes/{dispute.paypalDisputeId}/{selectedAction.toLowerCase().replace(/_/g, "-")}
-                </span>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-300 font-mono">
+                    POST /v1/customer/disputes/{dispute.paypalDisputeId}/{selectedAction.toLowerCase().replace(/_/g, "-")}
+                  </span>
+                  {(dispute.executionMode === "INTERNAL_SIMULATION" || dispute.isSimulation !== false) && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                      [SIMULATED - ZERO NETWORK REQUESTS]
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={handleSubmitToPayPal}
                   disabled={!authorizedByMerchant || isSubmitting}
-                  className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg ${
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg shrink-0 ${
                     authorizedByMerchant && !isSubmitting
                       ? "bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-500 hover:to-sky-400 text-white shadow-blue-500/25"
                       : "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700"
