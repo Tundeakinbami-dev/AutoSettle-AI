@@ -14,21 +14,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const { id } = params; // this is the PayPal dispute ID (paypalDisputeId)
   const client = new PayPalDisputesClient();
   try {
-    // 1️⃣ Fetch dispute from PayPal
-    const disputeRes = await client.getAccessToken().then(async (token) => {
-      const res = await fetch(`${client['baseUrl']}/v1/customer/disputes/${id}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`PayPal dispute fetch failed (${res.status}): ${txt}`);
-      }
-      return await res.json();
-    });
+    // 1️⃣ Fetch dispute via client (honors simulation mode without external network calls)
+    const disputeRes = await client.getDispute(id);
 
     // 2️⃣ Upsert local Dispute record (simplified mapping)
     const resource = disputeRes.resource || disputeRes; // PayPal may wrap under `resource`

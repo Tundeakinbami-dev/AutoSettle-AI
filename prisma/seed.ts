@@ -200,6 +200,82 @@ async function main() {
     },
   });
 
+  // 3B. Case 1B: "PP-D-30329" - State: NEEDS_REVIEW (Human approval pending)
+  await prisma.dispute.create({
+    data: {
+      merchantId: merchant.id,
+      paypalDisputeId: "PP-D-30329",
+      status: "REQUIRED_ACTION",
+      disputeLifeCycleStage: "CHARGEBACK",
+      reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+      disputeAmount: 195.00,
+      currency: "USD",
+      buyerId: "BUYER-30329",
+      buyerName: "Zachary Taylor",
+      buyerEmail: "z.taylor@example.com",
+      createTime: new Date(Date.now() - 3 * 24 * 3600 * 1000),
+      responseDueDate: new Date(Date.now() + 5 * 24 * 3600 * 1000),
+      merchantNotes: "Buyer claims item was not received. Tracking confirms delivered with signature.",
+      responseWorkflowStatus: "NEEDS_REVIEW",
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-30329184",
+          grossAmount: 195.00,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
+      order: {
+        create: {
+          orderNumber: "AG-30329",
+          orderDate: new Date(Date.now() - 11 * 24 * 3600 * 1000),
+          customerName: "Zachary Taylor",
+          customerEmail: "z.taylor@example.com",
+          shippingAddress: "124 Market Street, Suite 500, Philadelphia, PA 19106",
+          billingAddress: "124 Market Street, Suite 500, Philadelphia, PA 19106",
+          orderTotal: 195.00,
+          itemsJson: JSON.stringify([
+            { description: "Apex Trail Waterproof Boots (Size 10)", sku: "AG-BOOTS-10", qty: 1, price: 195.00 },
+          ]),
+        },
+      },
+      trackingInfo: {
+        create: {
+          carrier: "UPS",
+          trackingNumber: "1Z3032999999999999",
+          status: "DELIVERED",
+          destinationZip: "19106",
+          signedBy: "Z. TAYLOR",
+        },
+      },
+      draftResponses: {
+        create: [
+          {
+            version: 1,
+            status: "NEEDS_REVIEW",
+            targetAction: "PROVIDE_EVIDENCE",
+            rebuttalNarrative: "To PayPal Disputes Team: The merchandise for order #AG-30329 was delivered via UPS tracking 1Z3032999999999999 with signature confirmation.",
+            characterCount: 145,
+            isApproved: false,
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "DRAFT_SAVED",
+            severity: "INFO",
+            summary: "AI generated initial draft response for PP-D-30329",
+            actor: "ai_agent",
+            timestamp: new Date(Date.now() - 2 * 24 * 3600 * 1000),
+          },
+        ],
+      },
+    },
+  });
+
   // 4. Case 2: "PP-D-83910" - State: DRAFT (Item Not as Described, missing pick-pack photo)
   const dispute2 = await prisma.dispute.create({
     data: {
@@ -408,6 +484,110 @@ async function main() {
             actor: "merchant_user",
             actorId: "compliance_officer_1",
             timestamp: new Date(Date.now() - 30 * 60 * 1000),
+          },
+        ],
+      },
+    },
+  });
+
+  // 5B. Case 3B: "PP-D-25182" - State: APPROVED (Safe submission inspection case)
+  await prisma.dispute.create({
+    data: {
+      merchantId: merchant.id,
+      paypalDisputeId: "PP-D-25182",
+      status: "REQUIRED_ACTION",
+      disputeLifeCycleStage: "CHARGEBACK",
+      reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+      disputeAmount: 145.00,
+      currency: "USD",
+      buyerId: "BUYER-25182",
+      buyerName: "Elena Rostova",
+      buyerEmail: "elena.rostova@example.com",
+      createTime: new Date(Date.now() - 4 * 24 * 3600 * 1000),
+      responseDueDate: new Date(Date.now() + 6 * 24 * 3600 * 1000),
+      merchantNotes: "Dispute response approved by merchant compliance. Ready for verified API dispatch.",
+      responseWorkflowStatus: "APPROVED",
+      transaction: {
+        create: {
+          sellerTransactionId: "TXN-25182991",
+          grossAmount: 145.00,
+          currency: "USD",
+          paymentStatus: "COMPLETED",
+          paymentSource: "PAYPAL",
+        },
+      },
+      order: {
+        create: {
+          orderNumber: "AG-25182",
+          orderDate: new Date(Date.now() - 10 * 24 * 3600 * 1000),
+          customerName: "Elena Rostova",
+          customerEmail: "elena.rostova@example.com",
+          shippingAddress: "500 Howard Street, Suite 400, San Francisco, CA 94105",
+          billingAddress: "500 Howard Street, Suite 400, San Francisco, CA 94105",
+          orderTotal: 145.00,
+          itemsJson: JSON.stringify([
+            { description: "Apex Waterproof Expedition Duffle (60L)", sku: "AG-DUFF-60", qty: 1, price: 145.00 },
+          ]),
+        },
+      },
+      trackingInfo: {
+        create: {
+          carrier: "FEDEX",
+          trackingNumber: "794829104812",
+          status: "DELIVERED",
+          destinationZip: "94105",
+          signedBy: "E. ROSTOVA",
+        },
+      },
+      evidenceItems: {
+        create: [
+          {
+            evidenceType: "PROOF_OF_DELIVERY",
+            title: "FedEx Proof of Delivery with Signature",
+            description: "Direct signature delivery confirmed at commercial address.",
+            fileName: "fedex_pod_25182.pdf",
+            fileType: "application/pdf",
+            strength: "STRONG",
+            verified: true,
+          },
+        ],
+      },
+      aiAnalysis: {
+        create: {
+          summary: "Dispute PP-D-25182 (INR). Completeness: 95%. Recommended: PROVIDE_EVIDENCE.",
+          completenessScore: 95,
+          recommendedAction: "PROVIDE_EVIDENCE",
+          recommendationRationale: "Direct signature match on FedEx tracking record.",
+          keyStrengthsJson: JSON.stringify(["FedEx confirmed delivery with direct signature"]),
+          criticalGapsJson: JSON.stringify([]),
+          citationsJson: JSON.stringify([{ fact: "FedEx Tracking 794829104812 delivered and signed by recipient", source: "FedEx API", verified: true }]),
+          riskLevel: "LOW",
+        },
+      },
+      draftResponses: {
+        create: [
+          {
+            version: 1,
+            status: "APPROVED",
+            targetAction: "PROVIDE_EVIDENCE",
+            rebuttalNarrative: "To PayPal Disputes Team: The merchandise for order #AG-25182 was delivered via FedEx tracking #794829104812 with signature confirmation by E. Rostova.",
+            characterCount: 156,
+            isApproved: true,
+            approvedBy: "merchant_compliance_reviewer",
+            approvedAt: new Date(Date.now() - 2 * 3600 * 1000),
+          },
+        ],
+      },
+      auditLogs: {
+        create: [
+          {
+            merchantId: merchant.id,
+            eventType: "APPROVAL_GRANTED",
+            severity: "SUCCESS",
+            summary: "Human approval granted by compliance reviewer. Response ready for safe submission.",
+            actor: "merchant_user",
+            actorId: "compliance_officer_demo",
+            timestamp: new Date(Date.now() - 2 * 3600 * 1000),
           },
         ],
       },

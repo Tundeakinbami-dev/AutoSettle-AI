@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { PayPalDisputesClient } from "@/lib/paypal";
+import { PayPalDisputesClient, PayPalExecutionMode } from "@/lib/paypal";
 import { recordAuditLog, sanitizeData } from "@/lib/audit";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
@@ -9,7 +11,15 @@ export async function POST(
 ) {
   try {
     const { id } = params;
-    const body = await req.json();
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON request body" },
+        { status: 400 }
+      );
+    }
 
     const {
       action = "PROVIDE_EVIDENCE", // 'PROVIDE_EVIDENCE' | 'ACCEPT_CLAIM' | 'MAKE_OFFER'
@@ -40,7 +50,19 @@ export async function POST(
       );
     }
 
-    // Strict Human Approval Guardrail
+    // 1. Idempotency Check: Prevent duplicate submissions
+    if (dispute.responseWorkflowStatus === "SUBMITTED") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Dispute response has already been submitted to PayPal and cannot be re-submitted.",
+          workflowStatus: "SUBMITTED",
+        },
+        { status: 409 }
+      );
+    }
+
+    // 2. Strict Human Approval Guardrail
     const merchantRequiresApproval = dispute.merchant?.requireHumanApproval ?? true;
     if (merchantRequiresApproval && !authorizedByMerchant) {
       return NextResponse.json(
@@ -52,19 +74,61 @@ export async function POST(
       );
     }
 
-    // Ensure draft is approved before submission
+    // 3. Ensure draft exists and is approved before submission
     const latestDraft = dispute.draftResponses[0];
     if (!latestDraft) {
-      return NextResponse.json({
-        success: false,
-        error: "No draft response available for submission",
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "No draft response available for submission",
+        },
+        { status: 400 }
+      );
     }
     if (!latestDraft.isApproved) {
-      return NextResponse.json({
-        success: false,
-        error: "Draft response must be approved by a merchant before submission",
-      }, { status: 403 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Draft response must be approved by a merchant before submission",
+        },
+        { status: 403 }
+      );
+    }
+
+    // 4. Resolve Execution Mode (3 distinct execution paths)
+    const isDemoAppMode =
+      process.env.APP_MODE === "DEMO" ||
+      process.env.APP_MODE === "HACKATHON" ||
+      process.env.APP_MODE === "SIMULATION";
+
+    const merchantMode = dispute.merchant?.mode ?? "DEMO";
+    const forceSimulation = isDemoAppMode || merchantMode === "DEMO";
+
+    const connection = await prisma.payPalConnection.findFirst({
+      where: { merchantId: dispute.merchantId },
+    });
+
+    const connectionEnv =
+      (connection?.environment as any) || process.env.PAYPAL_ENVIRONMENT || "sandbox";
+
+    // Safety Requirement: Prohibit PAYPAL_LIVE in DEMO/HACKATHON mode
+    if ((connectionEnv === "live" || process.env.PAYPAL_ENVIRONMENT === "live") && isDemoAppMode) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "PAYPAL_LIVE mode is strictly prohibited in DEMO/HACKATHON environment. Switch to sandbox or DEMO mode.",
+        },
+        { status: 403 }
+      );
+    }
+
+    let executionMode: PayPalExecutionMode = "INTERNAL_SIMULATION";
+    if (!forceSimulation) {
+      if (connectionEnv === "live") {
+        executionMode = "PAYPAL_LIVE";
+      } else {
+        executionMode = "PAYPAL_SANDBOX";
+      }
     }
 
     await prisma.dispute.update({
@@ -74,7 +138,7 @@ export async function POST(
 
     const endpointPath = `/v1/customer/disputes/${dispute.paypalDisputeId}/${action.toLowerCase().replace(/_/g, "-")}`;
 
-    // Create In-Flight Submission Attempt
+    // Create In-Flight Submission Attempt Record
     const attempt = await prisma.submissionAttempt.create({
       data: {
         disputeId: dispute.id,
@@ -91,6 +155,7 @@ export async function POST(
             carrier: dispute.trackingInfo?.carrier,
             documentsCount: dispute.evidenceItems.length,
             offerAmount,
+            executionMode,
           })
         ),
       },
@@ -102,20 +167,25 @@ export async function POST(
       merchantId: dispute.merchantId,
       eventType: "SUBMISSION_ATTEMPTED",
       severity: "INFO",
-      summary: `Dispatched ${action} request to PayPal Disputes API (${endpointPath})`,
+      summary: executionMode === "INTERNAL_SIMULATION"
+        ? `[SIMULATED] Dispatched ${action} request via internal simulation (${endpointPath})`
+        : `Dispatched ${action} request to PayPal Disputes API (${endpointPath})`,
       details: {
         attemptId: attempt.id,
         endpoint: endpointPath,
         action,
         workflowStatus: "SUBMITTING",
+        mode: executionMode,
       },
       actor: "merchant_user",
     });
 
-    // If simulated error requested (for testing failure handling)
+    // 5. Failure Simulation Option (Independent Demo Toggle)
+    // Intercepts immediately before client invocation: zero network activity
     if (simulateError) {
-      const errorMsg = "PayPal API Error: 400 Bad Request — Dispute deadline elapsed or invalid document attachment.";
-      
+      const errorMsg =
+        "PayPal API Error: 400 Bad Request — Dispute deadline elapsed or invalid document attachment [SIMULATED].";
+
       await prisma.submissionAttempt.update({
         where: { id: attempt.id },
         data: {
@@ -131,13 +201,21 @@ export async function POST(
         data: { responseWorkflowStatus: "SUBMISSION_FAILED" },
       });
 
+      // Note: dispute.draftResponses[0].isApproved remains TRUE so merchant can retry submission
+
       await recordAuditLog({
         disputeId: dispute.id,
         merchantId: dispute.merchantId,
         eventType: "SUBMISSION_FAILED",
         severity: "ERROR",
-        summary: `PayPal submission failed (400 Bad Request): ${errorMsg}`,
-        details: { attemptId: attempt.id, httpStatus: 400, error: errorMsg },
+        summary: `PayPal submission failed (400 Bad Request) [SIMULATED]: ${errorMsg}`,
+        details: {
+          attemptId: attempt.id,
+          httpStatus: 400,
+          error: errorMsg,
+          mode: "INTERNAL_SIMULATION",
+          isSimulated: true,
+        },
         actor: "paypal_api",
       });
 
@@ -147,24 +225,19 @@ export async function POST(
           workflowStatus: "SUBMISSION_FAILED",
           error: errorMsg,
           attemptId: attempt.id,
+          mode: "INTERNAL_SIMULATION",
         },
         { status: 400 }
       );
     }
 
-    // Step 2: Dispatch to PayPal Disputes Client
-    // Determine operating mode from merchant settings
-    const merchantMode = dispute.merchant?.mode ?? "DEMO"; // default DEMO
-    const useSimulation = merchantMode === "DEMO";
-
-    const connection = await prisma.payPalConnection.findFirst({
-      where: { merchantId: dispute.merchantId },
-    });
-
+    // 6. Instantiate Client with Explicit Simulation Guard
     const paypalClient = new PayPalDisputesClient({
-      clientId: useSimulation ? undefined : (connection?.clientId ?? undefined),
-      clientSecret: useSimulation ? undefined : (connection?.clientSecret ?? undefined),
-      environment: (connection?.environment as any) || "sandbox",
+      clientId: forceSimulation ? "" : (connection?.clientId ?? undefined),
+      clientSecret: forceSimulation ? "" : (connection?.clientSecret ?? undefined),
+      environment: connectionEnv === "live" ? "live" : "sandbox",
+      isSimulation: forceSimulation,
+      forceMode: executionMode,
     });
 
     let result: any;
@@ -194,17 +267,20 @@ export async function POST(
       });
     }
 
-    // Step 3: Handle result and strictly verify state transition
-    // A draft must NEVER be displayed as submitted. Only show "SUBMITTED" after verified successful result!
+    // 7. Process API Result & Update Database
     if (result.success && (result.statusCode === 200 || result.statusCode === 201 || result.statusCode === 204)) {
-      // SUCCESSFUL RESULT RECEIVED
-      const newStatus = action === "ACCEPT_CLAIM" ? "RESOLVED" : action === "MAKE_OFFER" ? "WAITING_FOR_BUYER" : "UNDER_REVIEW";
+      const newStatus =
+        action === "ACCEPT_CLAIM"
+          ? "RESOLVED"
+          : action === "MAKE_OFFER"
+          ? "WAITING_FOR_BUYER"
+          : "UNDER_REVIEW";
       const newOutcome = action === "ACCEPT_CLAIM" ? "ACCEPTED" : dispute.resolutionOutcome;
 
       await prisma.submissionAttempt.update({
         where: { id: attempt.id },
         data: {
-          status: "SUBMITTED", // Exact submitted state!
+          status: "SUBMITTED",
           httpStatusCode: result.statusCode,
           responsePayloadSanitized: JSON.stringify(sanitizeData(result.responsePayload)),
           completedAt: new Date(),
@@ -216,7 +292,7 @@ export async function POST(
         data: {
           status: newStatus,
           resolutionOutcome: newOutcome,
-          responseWorkflowStatus: "SUBMITTED", // DISTINCT STATE: SUBMITTED
+          responseWorkflowStatus: "SUBMITTED",
         },
       });
 
@@ -227,17 +303,22 @@ export async function POST(
         });
       }
 
+      const isInternalSim = (result.executionMode || result.mode) === "INTERNAL_SIMULATION" || result.mode === "simulation";
+
       await recordAuditLog({
         disputeId: dispute.id,
         merchantId: dispute.merchantId,
         eventType: "API_RESULT_RECEIVED",
         severity: "SUCCESS",
-        summary: `PayPal Disputes API confirmed evidence receipt (${result.statusCode} OK). Dispute updated to ${newStatus}.`,
+        summary: isInternalSim
+          ? `[SIMULATED] PayPal Disputes API confirmed evidence receipt (${result.statusCode} OK). Dispute updated to ${newStatus}.`
+          : `PayPal Disputes API confirmed evidence receipt (${result.statusCode} OK). Dispute updated to ${newStatus}.`,
         details: {
           attemptId: attempt.id,
           httpStatus: result.statusCode,
           workflowStatus: "SUBMITTED",
-          mode: result.mode,
+          mode: result.executionMode || result.mode,
+          isSimulated: isInternalSim,
         },
         actor: "paypal_api",
       });
@@ -245,14 +326,17 @@ export async function POST(
       return NextResponse.json({
         success: true,
         workflowStatus: "SUBMITTED",
-        mode: result.mode,
+        mode: result.executionMode || result.mode,
         statusCode: result.statusCode,
         paypalResponse: result.responsePayload,
         attemptId: attempt.id,
       });
     } else {
-      // FAILURE OR UNCERTAIN OUTCOME -> SUBMISSION_FAILED
-      const errorMsg = result.responsePayload?.message || result.responsePayload?.error || "PayPal Disputes API rejected submission";
+      // Failure Outcome
+      const errorMsg =
+        result.responsePayload?.message ||
+        result.responsePayload?.error ||
+        "PayPal Disputes API rejected submission";
 
       await prisma.submissionAttempt.update({
         where: { id: attempt.id },
@@ -270,13 +354,20 @@ export async function POST(
         data: { responseWorkflowStatus: "SUBMISSION_FAILED" },
       });
 
+      // Preserve draftResponse.isApproved: true so retry remains possible
+
       await recordAuditLog({
         disputeId: dispute.id,
         merchantId: dispute.merchantId,
         eventType: "SUBMISSION_FAILED",
         severity: "ERROR",
         summary: `PayPal Disputes API rejected request (${result.statusCode}): ${errorMsg}`,
-        details: { attemptId: attempt.id, httpStatus: result.statusCode, error: errorMsg },
+        details: {
+          attemptId: attempt.id,
+          httpStatus: result.statusCode,
+          error: errorMsg,
+          mode: result.executionMode || result.mode,
+        },
         actor: "paypal_api",
       });
 
@@ -287,12 +378,25 @@ export async function POST(
           error: errorMsg,
           paypalResponse: result.responsePayload,
           attemptId: attempt.id,
+          mode: result.executionMode || result.mode,
         },
         { status: result.statusCode || 500 }
       );
     }
   } catch (error: any) {
     console.error("POST /api/disputes/[id]/submit-paypal error:", error);
+
+    // Revert dispute from SUBMITTING to SUBMISSION_FAILED if stuck
+    if (params?.id) {
+      await prisma.dispute.updateMany({
+        where: {
+          OR: [{ id: params.id }, { paypalDisputeId: params.id }],
+          responseWorkflowStatus: "SUBMITTING",
+        },
+        data: { responseWorkflowStatus: "SUBMISSION_FAILED" },
+      }).catch(() => {});
+    }
+
     return NextResponse.json(
       { success: false, error: error.message || "Submission process failed" },
       { status: 500 }

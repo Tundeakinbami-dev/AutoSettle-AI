@@ -43,6 +43,59 @@ describe("AutoSettle AI - Human Approval Workflow Tests", () => {
 
     disputeDbId = dispute.id;
     draftId = dispute.draftResponses[0].id;
+
+    // Ensure dispute PP-D-30329 exists in NEEDS_REVIEW state with unapproved draft for Test 7
+    const existing30329 = await prisma.dispute.findUnique({
+      where: { paypalDisputeId: "PP-D-30329" },
+      include: { draftResponses: true },
+    });
+
+    if (!existing30329) {
+      await prisma.dispute.create({
+        data: {
+          merchantId: "default_merchant",
+          paypalDisputeId: "PP-D-30329",
+          status: "REQUIRED_ACTION",
+          disputeLifeCycleStage: "CHARGEBACK",
+          reason: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+          disputeAmount: 195.00,
+          currency: "USD",
+          buyerName: "Zachary Taylor",
+          buyerEmail: "z.taylor@example.com",
+          responseDueDate: new Date(Date.now() + 5 * 24 * 3600 * 1000),
+          responseWorkflowStatus: "NEEDS_REVIEW",
+          draftResponses: {
+            create: {
+              version: 1,
+              status: "NEEDS_REVIEW",
+              targetAction: "PROVIDE_EVIDENCE",
+              rebuttalNarrative: "To PayPal Disputes Team: The merchandise for order #AG-30329 was delivered with signature.",
+              characterCount: 95,
+              isApproved: false,
+            },
+          },
+        },
+      });
+    } else {
+      // Reset state for clean test execution
+      await prisma.dispute.update({
+        where: { id: existing30329.id },
+        data: {
+          responseWorkflowStatus: "NEEDS_REVIEW",
+        },
+      });
+      if (existing30329.draftResponses.length > 0) {
+        await prisma.draftResponse.update({
+          where: { id: existing30329.draftResponses[0].id },
+          data: {
+            status: "NEEDS_REVIEW",
+            isApproved: false,
+            approvedBy: null,
+            approvedAt: null,
+          },
+        });
+      }
+    }
   });
 
   after(async () => {

@@ -7,11 +7,12 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "tsx src/tests/dispute-workflow.test.ts && tsx src/tests/e2e-workflow.test.ts && tsx src/tests/webhook-simulation.test.ts && tsx src/tests/approval-workflow.test.ts",
+    "test": "tsx src/tests/dispute-workflow.test.ts && tsx src/tests/e2e-workflow.test.ts && tsx src/tests/webhook-simulation.test.ts && tsx src/tests/approval-workflow.test.ts && tsx src/tests/paypal-simulation-safety.test.ts",
     "test:unit": "tsx src/tests/dispute-workflow.test.ts",
     "test:e2e": "tsx src/tests/e2e-workflow.test.ts",
     "test:webhook": "tsx src/tests/webhook-simulation.test.ts",
     "test:approval": "tsx src/tests/approval-workflow.test.ts",
+    "test:safety": "tsx src/tests/paypal-simulation-safety.test.ts",
     "seed": "tsx prisma/seed.ts"
   },
   "prisma": {
